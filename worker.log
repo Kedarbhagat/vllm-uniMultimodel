@@ -1,0 +1,82 @@
+2025-05-06 22:40:56,859 - worker - INFO - Worker starting up...
+2025-05-06 22:40:56,862 - worker - INFO - Connected to Redis at 172.31.21.186:6379
+2025-05-06 22:40:56,888 - worker - WARNING - Backend for microsoft/Phi-4-mini-instruct is not responding
+2025-05-06 22:40:56,892 - worker - WARNING - Backend for ./meta-llama/Llama-3.1-8B-Instruct-awq is not responding
+2025-05-06 22:40:58,907 - worker - WARNING - Health check failed for http://172.17.29.25:8000/v1/chat/completions: HTTPConnectionPool(host='172.17.29.25', port=8000): Max retries exceeded with url: /v1/chat/health (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x0000022F193E34D0>: Failed to establish a new connection: [WinError 10061] No connection could be made because the target machine actively refused it'))
+2025-05-06 22:40:58,908 - worker - WARNING - Backend for ./mistral-instruct-v0.2-awq is not responding
+2025-05-06 22:40:58,908 - worker - WARNING - No healthy backends found! Worker will still run but may not process tasks correctly.
+2025-05-06 22:40:58,909 - worker - INFO - Worker started. 13 tasks in queue.
+2025-05-06 22:40:58,910 - worker - INFO - Dequeued task cf7c6149-21a8-4635-b83f-6ebe66246631
+2025-05-06 22:40:58,910 - worker - INFO - Processing task cf7c6149-21a8-4635-b83f-6ebe66246631 with model microsoft/Phi-4-mini-instruct
+2025-05-06 22:40:58,914 - worker - WARNING - Backend http://172.31.21.186:8000/v1/chat/completions seems unhealthy, attempting request anyway
+2025-05-06 22:40:58,914 - worker - INFO - Sending request to backend http://172.31.21.186:8000/v1/chat/completions for task cf7c6149-21a8-4635-b83f-6ebe66246631
+2025-05-06 22:40:58,941 - worker - ERROR - API request failed for task cf7c6149-21a8-4635-b83f-6ebe66246631: 404 Client Error: Not Found for url: http://172.31.21.186:8000/v1/chat/completions
+2025-05-06 22:40:58,942 - worker - INFO - Dequeued task fca6ae4f-adba-4f2e-84ac-8a7243b540dd
+2025-05-06 22:40:58,942 - worker - INFO - Processing task fca6ae4f-adba-4f2e-84ac-8a7243b540dd with model microsoft/Phi-4-mini-instruct
+2025-05-06 22:40:58,946 - worker - WARNING - Backend http://172.31.21.186:8000/v1/chat/completions seems unhealthy, attempting request anyway
+2025-05-06 22:40:58,947 - worker - INFO - Sending request to backend http://172.31.21.186:8000/v1/chat/completions for task fca6ae4f-adba-4f2e-84ac-8a7243b540dd
+2025-05-06 22:40:58,972 - worker - ERROR - API request failed for task fca6ae4f-adba-4f2e-84ac-8a7243b540dd: 404 Client Error: Not Found for url: http://172.31.21.186:8000/v1/chat/completions
+2025-05-06 22:40:58,973 - worker - INFO - Dequeued task 03209dbd-73eb-4146-8d9d-55b3a29f09f2
+2025-05-06 22:40:58,973 - worker - INFO - Processing task 03209dbd-73eb-4146-8d9d-55b3a29f09f2 with model microsoft/Phi-4-mini-instruct
+2025-05-06 22:40:59,002 - worker - WARNING - Backend http://172.31.21.186:8000/v1/chat/completions seems unhealthy, attempting request anyway
+2025-05-06 22:40:59,002 - worker - INFO - Sending request to backend http://172.31.21.186:8000/v1/chat/completions for task 03209dbd-73eb-4146-8d9d-55b3a29f09f2
+2025-05-06 22:40:59,019 - worker - ERROR - API request failed for task 03209dbd-73eb-4146-8d9d-55b3a29f09f2: 404 Client Error: Not Found for url: http://172.31.21.186:8000/v1/chat/completions
+2025-05-06 22:40:59,020 - worker - INFO - Dequeued task d2c2ebd1-bda0-4a45-93e7-861e3299b6cb
+2025-05-06 22:40:59,020 - worker - INFO - Processing task d2c2ebd1-bda0-4a45-93e7-861e3299b6cb with model microsoft/Phi-4-mini-instruct
+2025-05-06 22:40:59,032 - worker - WARNING - Backend http://172.31.21.186:8000/v1/chat/completions seems unhealthy, attempting request anyway
+2025-05-06 22:40:59,033 - worker - INFO - Sending request to backend http://172.31.21.186:8000/v1/chat/completions for task d2c2ebd1-bda0-4a45-93e7-861e3299b6cb
+2025-05-06 22:40:59,037 - worker - ERROR - API request failed for task d2c2ebd1-bda0-4a45-93e7-861e3299b6cb: 404 Client Error: Not Found for url: http://172.31.21.186:8000/v1/chat/completions
+2025-05-06 22:40:59,037 - worker - INFO - Dequeued task 92cd04d4-465b-491a-a790-d614ce2d0489
+2025-05-06 22:40:59,038 - worker - INFO - Processing task 92cd04d4-465b-491a-a790-d614ce2d0489 with model microsoft/Phi-4-mini-instruct
+2025-05-06 22:40:59,041 - worker - WARNING - Backend http://172.31.21.186:8000/v1/chat/completions seems unhealthy, attempting request anyway
+2025-05-06 22:40:59,042 - worker - INFO - Sending request to backend http://172.31.21.186:8000/v1/chat/completions for task 92cd04d4-465b-491a-a790-d614ce2d0489
+2025-05-06 22:40:59,065 - worker - ERROR - API request failed for task 92cd04d4-465b-491a-a790-d614ce2d0489: 404 Client Error: Not Found for url: http://172.31.21.186:8000/v1/chat/completions
+2025-05-06 22:40:59,066 - worker - INFO - Dequeued task 64dfec50-4ddd-458b-a624-78832d990213
+2025-05-06 22:40:59,066 - worker - INFO - Processing task 64dfec50-4ddd-458b-a624-78832d990213 with model microsoft/Phi-4-mini-instruct
+2025-05-06 22:40:59,094 - worker - WARNING - Backend http://172.31.21.186:8000/v1/chat/completions seems unhealthy, attempting request anyway
+2025-05-06 22:40:59,094 - worker - INFO - Sending request to backend http://172.31.21.186:8000/v1/chat/completions for task 64dfec50-4ddd-458b-a624-78832d990213
+2025-05-06 22:40:59,111 - worker - ERROR - API request failed for task 64dfec50-4ddd-458b-a624-78832d990213: 404 Client Error: Not Found for url: http://172.31.21.186:8000/v1/chat/completions
+2025-05-06 22:40:59,112 - worker - INFO - Dequeued task 95ed1039-ce31-426f-a90f-e2f37c7ca79f
+2025-05-06 22:40:59,112 - worker - INFO - Processing task 95ed1039-ce31-426f-a90f-e2f37c7ca79f with model microsoft/Phi-4-mini-instruct
+2025-05-06 22:40:59,141 - worker - WARNING - Backend http://172.31.21.186:8000/v1/chat/completions seems unhealthy, attempting request anyway
+2025-05-06 22:40:59,141 - worker - INFO - Sending request to backend http://172.31.21.186:8000/v1/chat/completions for task 95ed1039-ce31-426f-a90f-e2f37c7ca79f
+2025-05-06 22:40:59,157 - worker - ERROR - API request failed for task 95ed1039-ce31-426f-a90f-e2f37c7ca79f: 404 Client Error: Not Found for url: http://172.31.21.186:8000/v1/chat/completions
+2025-05-06 22:40:59,158 - worker - INFO - Dequeued task a93d29fd-b6ad-497c-a07e-d5ddb559db88
+2025-05-06 22:40:59,159 - worker - INFO - Processing task a93d29fd-b6ad-497c-a07e-d5ddb559db88 with model microsoft/Phi-4-mini-instruct
+2025-05-06 22:40:59,187 - worker - WARNING - Backend http://172.31.21.186:8000/v1/chat/completions seems unhealthy, attempting request anyway
+2025-05-06 22:40:59,187 - worker - INFO - Sending request to backend http://172.31.21.186:8000/v1/chat/completions for task a93d29fd-b6ad-497c-a07e-d5ddb559db88
+2025-05-06 22:40:59,192 - worker - ERROR - API request failed for task a93d29fd-b6ad-497c-a07e-d5ddb559db88: 404 Client Error: Not Found for url: http://172.31.21.186:8000/v1/chat/completions
+2025-05-06 22:40:59,193 - worker - INFO - Dequeued task d34a64b7-f9d4-46e2-8814-29443d41cdf4
+2025-05-06 22:40:59,193 - worker - INFO - Processing task d34a64b7-f9d4-46e2-8814-29443d41cdf4 with model ./meta-llama/Llama-3.1-8B-Instruct-awq
+2025-05-06 22:40:59,219 - worker - WARNING - Backend http://172.31.21.186:8001/v1/chat/completions seems unhealthy, attempting request anyway
+2025-05-06 22:40:59,219 - worker - INFO - Sending request to backend http://172.31.21.186:8001/v1/chat/completions for task d34a64b7-f9d4-46e2-8814-29443d41cdf4
+2025-05-06 22:40:59,236 - worker - ERROR - API request failed for task d34a64b7-f9d4-46e2-8814-29443d41cdf4: 404 Client Error: Not Found for url: http://172.31.21.186:8001/v1/chat/completions
+2025-05-06 22:40:59,236 - worker - INFO - Dequeued task 51177070-f1ee-4e9a-a140-c9d4b45248fc
+2025-05-06 22:40:59,237 - worker - INFO - Processing task 51177070-f1ee-4e9a-a140-c9d4b45248fc with model ./meta-llama/Llama-3.1-8B-Instruct-awq
+2025-05-06 22:40:59,251 - worker - WARNING - Backend http://172.31.21.186:8001/v1/chat/completions seems unhealthy, attempting request anyway
+2025-05-06 22:40:59,251 - worker - INFO - Sending request to backend http://172.31.21.186:8001/v1/chat/completions for task 51177070-f1ee-4e9a-a140-c9d4b45248fc
+2025-05-06 22:40:59,267 - worker - ERROR - API request failed for task 51177070-f1ee-4e9a-a140-c9d4b45248fc: 404 Client Error: Not Found for url: http://172.31.21.186:8001/v1/chat/completions
+2025-05-06 22:40:59,268 - worker - INFO - Dequeued task 7d7ea585-b271-427e-867b-9468b0768ae4
+2025-05-06 22:40:59,269 - worker - INFO - Processing task 7d7ea585-b271-427e-867b-9468b0768ae4 with model ./meta-llama/Llama-3.1-8B-Instruct-awq
+2025-05-06 22:40:59,297 - worker - WARNING - Backend http://172.31.21.186:8001/v1/chat/completions seems unhealthy, attempting request anyway
+2025-05-06 22:40:59,297 - worker - INFO - Sending request to backend http://172.31.21.186:8001/v1/chat/completions for task 7d7ea585-b271-427e-867b-9468b0768ae4
+2025-05-06 22:40:59,301 - worker - ERROR - API request failed for task 7d7ea585-b271-427e-867b-9468b0768ae4: 404 Client Error: Not Found for url: http://172.31.21.186:8001/v1/chat/completions
+2025-05-06 22:40:59,302 - worker - INFO - Dequeued task 8b55f4f6-dc80-401b-be81-c608cbd926dc
+2025-05-06 22:40:59,303 - worker - INFO - Processing task 8b55f4f6-dc80-401b-be81-c608cbd926dc with model ./meta-llama/Llama-3.1-8B-Instruct-awq
+2025-05-06 22:40:59,329 - worker - WARNING - Backend http://172.31.21.186:8001/v1/chat/completions seems unhealthy, attempting request anyway
+2025-05-06 22:40:59,329 - worker - INFO - Sending request to backend http://172.31.21.186:8001/v1/chat/completions for task 8b55f4f6-dc80-401b-be81-c608cbd926dc
+2025-05-06 22:40:59,346 - worker - ERROR - API request failed for task 8b55f4f6-dc80-401b-be81-c608cbd926dc: 404 Client Error: Not Found for url: http://172.31.21.186:8001/v1/chat/completions
+2025-05-06 22:40:59,347 - worker - INFO - Dequeued task 8392c368-02d4-44a9-9049-a442df30ccbd
+2025-05-06 22:40:59,347 - worker - INFO - Processing task 8392c368-02d4-44a9-9049-a442df30ccbd with model ./meta-llama/Llama-3.1-8B-Instruct-awq
+2025-05-06 22:40:59,360 - worker - WARNING - Backend http://172.31.21.186:8001/v1/chat/completions seems unhealthy, attempting request anyway
+2025-05-06 22:40:59,361 - worker - INFO - Sending request to backend http://172.31.21.186:8001/v1/chat/completions for task 8392c368-02d4-44a9-9049-a442df30ccbd
+2025-05-06 22:40:59,378 - worker - ERROR - API request failed for task 8392c368-02d4-44a9-9049-a442df30ccbd: 404 Client Error: Not Found for url: http://172.31.21.186:8001/v1/chat/completions
+2025-05-06 22:43:19,825 - worker - INFO - Shutdown signal received. Finishing current task before exiting...
+2025-05-06 22:43:19,826 - worker - INFO - Worker shutdown complete.
+2025-05-06 22:43:23,724 - worker - INFO - Worker starting up...
+2025-05-06 22:43:23,726 - worker - INFO - Connected to Redis at 172.31.21.186:6379
+2025-05-06 22:43:23,735 - worker - WARNING - Backend for ./meta-llama/Llama-3.1-8B-Instruct-awq is not responding
+2025-05-06 22:43:23,736 - worker - WARNING - No healthy backends found! Worker will still run but may not process tasks correctly.
+2025-05-06 22:43:23,736 - worker - INFO - Worker started. 0 tasks in queue.
+2025-05-06 22:44:18,897 - worker - INFO - Shutdown signal received. Finishing current task before exiting...
+2025-05-06 22:44:18,897 - worker - INFO - Worker shutdown complete.

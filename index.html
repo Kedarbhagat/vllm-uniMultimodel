@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Chat Completion Client</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 40px;
+        }
+        #response {
+            margin-top: 20px;
+            padding: 10px;
+            border: 1px solid #aaa;
+            background-color: #f9f9f9;
+        }
+    </style>
+</head>
+<body>
+
+<h1>Chat Completion Client</h1>
+
+<label for="model">Select Model:</label>
+<select id="model">
+    <option value="microsoft/Phi-4-mini-instruct">Phi-4-mini-instruct</option>
+    <option value="meta-llama/Llama-3.1-8B-Instruct">Llama-3.1-8B-Instruct</option>
+    <option value="./mistral-instruct-v0.2-awq">Mistral-0.2-AWQ</option>
+</select>
+
+<br><br>
+
+<label for="message">Enter your message:</label><br>
+<textarea id="message" rows="5" cols="60"></textarea>
+
+<br><br>
+
+<button onclick="sendRequest()">Send</button>
+
+<div id="response"></div>
+
+<script>
+async function sendRequest() {
+    const model = document.getElementById("model").value;
+    const message = document.getElementById("message").value;
+
+    document.getElementById("response").innerHTML = "Sending request...";
+
+    // Step 1: Submit task
+    const taskResponse = await fetch("http://172.17.25.83:8080/v1/chat/completions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            model: model,
+            messages: [{ role: "user", content: message }],
+            temperature: 0.7
+        })
+    });
+
+    const taskData = await taskResponse.json();
+    const taskId = taskData.task_id;
+    console.log("Task ID:", taskId);
+
+    // Step 2: Poll for result
+    pollResult(taskId);
+}
+
+async function pollResult(taskId) {
+    document.getElementById("response").innerHTML = "Waiting for model to complete...";
+
+    const interval = setInterval(async () => {
+        const resultResponse = await fetch(`http://172.17.25.83:8081/v1/chat/result/${taskId}`);
+        const resultData = await resultResponse.json();
+
+        if (resultData.status === "completed") {
+            clearInterval(interval);
+            document.getElementById("response").innerHTML = `
+                <h3>Response:</h3>
+                <pre>${JSON.stringify(resultData.result, null, 2)}</pre>
+            `;
+        } else {
+            console.log("Still pending...");
+        }
+    }, 2000); // Poll every 2 seconds
+}
+</script>
+
+</body>
+</html>

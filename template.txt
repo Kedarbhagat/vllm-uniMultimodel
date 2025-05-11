@@ -1,0 +1,535 @@
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
+import redis
+import json
+import uuid
+import requests
+
+app = FastAPI()
+
+# Connect to Redis
+r = redis.Redis(host="172.31.21.186", port=6379, decode_responses=True)
+
+# Model-to-backend mapping (you can add your backend URLs here)
+MODEL_TO_BACKEND = {
+    "microsoft/Phi-4-mini-instruct": "http://172.31.21.186:8000/v1/chat/completions",
+    "meta-llama/Llama-3.1-8B-Instruct": "http://172.31.21.186:8001/v1/chat/completions",
+    "./mistral-instruct-v0.2-awq": "http://172.17.29.25:8000/v1/chat/completions"
+}
+
+# Request body structure for the chat completion request
+class ChatRequest(BaseModel):
+    role: str
+    content: str
+
+class TaskRequest(BaseModel):
+    model: str
+    messages: list[ChatRequest]
+    temperature: float = 0.7  # Optional field with a default value
+
+@app.post("/v1/chat/completions")
+async def chat_completions(task: TaskRequest):
+    task_id = str(uuid.uuid4())  # Generate a unique task ID
+    task_data = {
+        "task_id": task_id,
+        "model": task.model,
+        "messages": task.messages,
+        "temperature": task.temperature,
+    }
+
+    # Get the backend URL based on the selected model
+    backend_url = MODEL_TO_BACKEND.get(task.model)
+    if not backend_url:
+        raise HTTPException(status_code=400, detail="Invalid model selected")
+
+    try:
+        # Send the request to the backend model service
+        headers = {"Content-Type": "application/json"}
+        response = requests.post(backend_url, json=task.dict(), headers=headers, timeout=300)
+
+        # Check if the response is valid
+        response.raise_for_status()
+
+        # Save the result in Redis
+        result = response.json()
+        r.set(f"result:{task_id}", json.dumps({"status": "completed", "result": result}), ex=3600)
+
+        # Return the task ID and the result
+        return {"task_id": task_id, "status": "completed", "result": result}
+
+    except requests.exceptions.RequestException as e:
+        # Handle any errors during the request to the backend
+        raise HTTPException(status_code=500, detail=f"Error processing the request: {str(e)}")
+
+
+
+
+// without redis 
+
+
+from fastapi import FastAPI, Request, HTTPException
+from fastapi.responses import StreamingResponse, JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
+import requests
+import json
+import asyncio
+
+app = FastAPI()
+
+# Allow CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# ✅ Model-to-endpoint mapping
+MODEL_TO_BACKEND = {
+    "microsoft/Phi-4-mini-instruct": "http://172.31.21.186:8000/v1/chat/completions",  # Workstation A
+    "meta-llama/Llama-3.1-8B-Instruct": "http://172.31.21.186:8001/v1/chat/completions",  # Workstation A
+    "./mistral-instruct-v0.2-awq":"http://172.17.29.25:8000/v1/chat/completions"
+    # Add more here
+}
+
+@app.post("/v1/chat/completions")
+async def chat_completions(request: Request):
+    body = await request.json()
+    messages = body.get("messages")
+    model = body.get("model")
+    stream = bool(body.get("stream", False))
+
+    if not model or model not in MODEL_TO_BACKEND:
+        raise HTTPException(400, detail=f"Unknown or missing model: {model}")
+
+    backend_url = MODEL_TO_BACKEND[model]
+
+    if not messages or not isinstance(messages, list):
+        raise HTTPException(400, detail="`messages` must be a non-empty list")
+
+    if stream:
+        def stream_vllm():
+            headers = {"Content-Type": "application/json"}
+            payload = {"model": model, "messages": messages, "stream": True}
+            try:
+                resp = requests.post(backend_url, headers=headers, json=payload, stream=True, timeout=60)
+                if resp.status_code != 200:
+                    raise HTTPException(resp.status_code, detail=resp.text)
+                for line in resp.iter_lines():
+                    if not line:
+                        continue
+                    text = line.decode("utf-8")
+                    if text.startswith("data: "):
+                        text = text[len("data: "):]
+                    if text.strip() == "[DONE]":
+                        break
+                    yield f"data: {text}\n\n"
+            except Exception as e:
+                yield f"data: {{\"error\": \"{str(e)}\"}}\n\n"
+
+        return StreamingResponse(stream_vllm(), media_type="text/event-stream")
+
+    else:
+        headers = {"Content-Type": "application/json"}
+        payload = {"model": model, "messages": messages, "stream": False}
+        try:
+            resp = await asyncio.to_thread(
+                lambda: requests.post(backend_url, headers=headers, json=payload, timeout=60)
+            )
+            return JSONResponse(content=resp.json(), status_code=resp.status_code)
+        except Exception as e:
+            raise HTTPException(500, detail=f"Backend error: {str(e)}")
+
+
+            ------------------------------------------------------------------------------------------------------------------------------------------------------------------
+            FAST API REDIS
+        from fastapi import FastAPI, HTTPException, Request, Depends, BackgroundTasks
+from fastapi.middleware.cors import CORSMiddleware
+import redis
+import json
+import uuid
+import logging
+import requests
+from typing import Dict, Any, Optional, List
+from pydantic import BaseModel, Field
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger("api_server")
+
+# FastAPI app
+app = FastAPI(title="LLM Task Processing API")
+
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Redis configuration
+REDIS_HOST = "172.31.21.186"  # Change to localhost if Redis is on the same machine
+REDIS_PORT = 6379
+
+# Model to backend mapping
+MODEL_TO_BACKEND = {
+    #"microsoft/Phi-4-mini-instruct": "http://172.31.21.186:8000/v1/chat/completions",
+    "./meta-llama/Llama-3.1-8B-Instruct-awq": "http://172.31.21.186:8000/v1/chat/completions",
+    # "./mistral-instruct-v0.2-awq": "http://172.17.29.25:8000/v1/chat/completions"
+}
+
+# Pydantic models for request validation
+class ChatMessage(BaseModel):
+    role: str
+    content: str
+
+class ChatRequest(BaseModel):
+    model: str
+    messages: list[ChatMessage]
+    temperature: Optional[float] = Field(default=0.7)
+    max_tokens: Optional[int] = Field(default=1024)
+    stream: Optional[bool] = Field(default=False)
+
+class TaskResponse(BaseModel):
+    task_id: str
+    status: str
+
+class ResultResponse(BaseModel):
+    status: str
+    task_id: str
+    result: Optional[Dict[str, Any]] = None
+    error: Optional[str] = None
+
+# Redis connection function
+def get_redis_client():
+    try:
+        client = redis.Redis(
+            host=REDIS_HOST,
+            port=REDIS_PORT,
+            decode_responses=True,
+            socket_timeout=5,
+            socket_connect_timeout=5
+        )
+        # Test connection
+        client.ping()
+        return client
+    except redis.RedisError as e:
+        logger.error(f"Redis connection error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Redis connection error: {str(e)}")
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint"""
+    try:
+        # Check Redis connection
+        r = get_redis_client()
+
+        # Check if worker is active by checking queue size
+        queue_size = r.llen("task_queue")
+
+        # Optionally check backend services
+        backends_status = {}
+        for model, url in MODEL_TO_BACKEND.items():
+            try:
+                health_url = url.rsplit('/', 1)[0] + "/health"
+                response = requests.get(health_url, timeout=2)
+                backends_status[model] = "available" if response.status_code == 200 else "error"
+            except Exception:
+                backends_status[model] = "unavailable"
+
+        return {
+            "status": "healthy",
+            "redis": "connected",
+            "queue_size": queue_size,
+            "backends": backends_status
+        }
+    except Exception as e:
+        return {
+            "status": "unhealthy",
+            "error": str(e)
+        }
+
+@app.get("/")
+async def root():
+    return {"status": "online", "message": "LLM Task Processing API"}
+
+@app.post("/v1/chat/completions", response_model=TaskResponse)
+async def create_chat_completion(
+    request: ChatRequest,
+    background_tasks: BackgroundTasks,
+    r: redis.Redis = Depends(get_redis_client)
+):
+    try:
+        # Validate model
+        if request.model not in MODEL_TO_BACKEND:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unknown model: {request.model}. Available models: {list(MODEL_TO_BACKEND.keys())}"
+            )
+
+        # Generate a unique task ID
+        task_id = str(uuid.uuid4())
+
+        # Create task data
+        task_data = {
+            "task_id": task_id,
+            "model": request.model,
+            "messages": [msg.dict() for msg in request.messages],
+            "temperature": request.temperature,
+            "max_tokens": request.max_tokens,
+            "stream": request.stream
+        }
+
+        # Add task to queue
+        r.rpush("task_queue", json.dumps(task_data))
+
+        # Log task creation
+        logger.info(f"Task created - ID: {task_id}, Model: {request.model}")
+
+        # Check if worker is immediately available and if not, ping worker status
+        background_tasks.add_task(check_worker_status, r)
+
+        return {"task_id": task_id, "status": "pending"}
+
+    except redis.RedisError as e:
+        logger.error(f"Redis error in chat completion: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Redis error: {str(e)}")
+    except Exception as e:
+        logger.error(f"Server error in chat completion: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Server error: {str(e)}")
+
+@app.get("/v1/chat/result/{task_id}", response_model=ResultResponse)
+async def get_result(
+    task_id: str,
+    r: redis.Redis = Depends(get_redis_client)
+):
+    try:
+        # Check Redis for the result
+        result = r.get(f"result:{task_id}")
+
+        # If result exists, return it
+        if result:
+            logger.info(f"Result found for task {task_id}")
+            return json.loads(result)
+
+        # Check if task exists in queue
+        queue_length = r.llen("task_queue")
+        logger.info(f"Task {task_id} not found in results, queue length: {queue_length}")
+
+        # If result is not found, return status 'pending'
+        return {"status": "pending", "task_id": task_id}
+
+    except redis.RedisError as e:
+        logger.error(f"Redis error in get result: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Redis error: {str(e)}")
+
+def check_worker_status(r: redis.Redis):
+    """Check if worker appears to be running by monitoring queue size"""
+    try:
+        # Check initial queue size
+        initial_size = r.llen("task_queue")
+
+        # Wait a short time
+        import time
+        time.sleep(2)
+
+        # Check new queue size
+        new_size = r.llen("task_queue")
+
+        # If queue size isn't decreasing, worker might be stuck
+        if new_size >= initial_size and initial_size > 0:
+            logger.warning("Worker may not be processing tasks. Queue size not decreasing.")
+
+            # Optionally publish a health check message
+            r.publish("worker_health_check", json.dumps({"timestamp": time.time()}))
+
+    except Exception as e:
+        logger.error(f"Error checking worker status: {str(e)}")
+
+@app.get("/v1/queue/status")
+async def queue_status(r: redis.Redis = Depends(get_redis_client)):
+    """Get status of task queue"""
+    try:
+        queue_length = r.llen("task_queue")
+
+        # Peek at up to 5 tasks in the queue without removing them
+        pending_tasks = []
+        for i in range(min(5, queue_length)):
+            task_json = r.lindex("task_queue", i)
+            if task_json:
+                task = json.loads(task_json)
+                pending_tasks.append({
+                    "task_id": task.get("task_id"),
+                    "model": task.get("model")
+                })
+
+        return {
+            "queue_length": queue_length,
+            "pending_tasks": pending_tasks
+        }
+    except Exception as e:
+        logger.error(f"Error fetching queue status: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error fetching queue status: {str(e)}")
+
+@app.get("/v1/models")
+async def list_models():
+    """List available LLM models"""
+    models = []
+    for model_name, url in MODEL_TO_BACKEND.items():
+        try:
+            # Check if backend is available
+            health_url = url.rsplit('/', 1)[0] + "/health"
+            response = requests.get(health_url, timeout=2)
+            available = response.status_code == 200
+        except Exception:
+            available = False
+
+        models.append({
+            "id": model_name,
+            "available": available
+        })
+
+    return {"models": models}
+
+if __name__ == "__main__":
+    import uvicorn
+    logger.info("Starting FastAPI server on port 8081")
+    uvicorn.run(app, host="0.0.0.0", port=8081)
+    -------------------------------------------------------------------------------WORKER------------------------------------------------------------------------------
+import redis
+import json
+import time
+import requests
+import logging
+from redis.exceptions import ConnectionError, TimeoutError
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger('worker')
+
+# Model to backend mapping
+MODEL_TO_BACKEND = {
+    #"microsoft/Phi-4-mini-instruct": "http://172.31.21.186:8000/v1/chat/completions",
+    "./meta-llama/Llama-3.1-8B-Instruct-awq": "http://172.31.21.186:8000/v1/chat/completions",
+    #"./mistral-instruct-v0.2-awq": "http://172.17.29.25:8000/v1/chat/completions"
+}
+
+def connect_to_redis(host="172.31.21.186", port=6379):
+    """Connect to Redis with retry mechanism."""
+    retries = 5
+    while retries > 0:
+        try:
+            redis_client = redis.Redis(
+                host=host,
+                port=port,
+                db=0,
+                decode_responses=True,
+                socket_timeout=30,
+                socket_connect_timeout=30,
+            )
+            redis_client.ping()  # Check if Redis is reachable
+            logger.info("Connected to Redis")
+            return redis_client
+        except (ConnectionError, TimeoutError) as e:
+            logger.error(f"Error connecting to Redis: {e}, retrying... {retries} attempts left.")
+            retries -= 1
+            time.sleep(2)
+    raise ConnectionError("Unable to connect to Redis after several retries")
+
+def process_task(task, redis_client):
+    """Process a single task and store the result."""
+    try:
+        task_id = task["task_id"]
+        backend_url = MODEL_TO_BACKEND.get(task["model"])
+        
+        if not backend_url:
+            # Handle invalid model
+            error_result = {"task_id": task_id, "status": "failed", "error": "Invalid model"}
+            redis_client.set(f"result:{task_id}", json.dumps(error_result), ex=3600)
+            logger.error(f"Invalid model for task {task_id}. Error stored.")
+            return
+        
+        logger.info(f"Processing task {task_id} using backend {backend_url}")
+        headers = {"Content-Type": "application/json"}
+        
+        # Make request to the LLM backend
+        response = requests.post(
+            backend_url, 
+            json=task, 
+            headers=headers, 
+            timeout=300  # Long timeout for heavy models
+        )
+        response.raise_for_status()
+        
+        # Prepare and store the result
+        result_data = {
+            "task_id": task_id,
+            "status": "completed",
+            "result": response.json()
+        }
+        
+        # Store the result in Redis with an expiry of 1 hour
+        redis_client.set(f"result:{task_id}", json.dumps(result_data), ex=3600)
+        logger.info(f"Task {task_id} completed and result stored.")
+        
+    except requests.exceptions.RequestException as e:
+        # Handle API request errors
+        error_result = {
+            "task_id": task["task_id"],
+            "status": "failed",
+            "error": f"API request failed: {str(e)}"
+        }
+        redis_client.set(f"result:{task['task_id']}", json.dumps(error_result), ex=3600)
+        logger.error(f"API request failed for task {task['task_id']}: {str(e)}")
+        
+    except Exception as e:
+        # Handle any other exceptions
+        error_result = {
+            "task_id": task["task_id"],
+            "status": "failed",
+            "error": f"Task processing error: {str(e)}"
+        }
+        redis_client.set(f"result:{task['task_id']}", json.dumps(error_result), ex=3600)
+        logger.error(f"Error processing task {task['task_id']}: {str(e)}")
+
+def main():
+    """Main worker loop."""
+    redis_client = None
+    
+    while True:
+        try:
+            # Ensure we have a Redis connection
+            if redis_client is None:
+                redis_client = connect_to_redis()
+            
+            # Get the next task from the queue
+            queue_item = redis_client.blpop("task_queue", timeout=5)
+            
+            # If we got a task, process it
+            if queue_item:
+                _, task_data = queue_item
+                task = json.loads(task_data)
+                process_task(task, redis_client)
+            
+        except redis.exceptions.ConnectionError:
+            logger.warning("Connection lost. Reconnecting to Redis...")
+            redis_client = None  # Will reconnect on next iteration
+            time.sleep(2)
+            
+        except (TimeoutError, Exception) as e:
+            logger.error(f"Worker Error: {str(e)}")
+            time.sleep(2)  # Delay before retrying
+            
+        except KeyboardInterrupt:
+            logger.info("Worker shutdown requested. Exiting gracefully...")
+            break  # Graceful shutdown on keyboard interrupt
+
+if __name__ == "__main__":
+    main()
