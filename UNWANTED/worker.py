@@ -1,5 +1,5 @@
 # celery_worker.py
-from worker import Celery
+from UNWANTED.worker import Celery
 import requests
 
 # Connect to Redis (this assumes Redis is running on the default port 6379)
