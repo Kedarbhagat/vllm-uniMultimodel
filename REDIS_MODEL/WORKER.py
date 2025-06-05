@@ -11,10 +11,14 @@ import httpx # For making requests to vLLM
 # --- Configuration ---
 REDIS_HOST = os.getenv("REDIS_HOST", "172.31.21.186")
 REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
-VLLM_BACKEND_URL = os.getenv("VLLM_BACKEND_URL", "http://172.31.21.186:8000/v1/chat/completions")
+# VLLM_BACKEND_URL is no longer directly used for making requests;
+# it's expected to be passed in task_data from the Gateway.
+# You can remove it or keep it as a fallback/default for testing,
+# but it won't be used in the 'process_task' function directly.
+# VLLM_BACKEND_URL = os.getenv("VLLM_BACKEND_URL", "http://172.31.21.186:8000/v1/chat/completions")
 WORKER_POLL_INTERVAL = float(os.getenv("WORKER_POLL_INTERVAL", 0.5)) # seconds
 
-# NEW: VLLM API Key - ensure this matches what you set in your vLLM server startup
+# VLLM API Key - ensure this matches what you set in your vLLM server startup
 VLLM_API_KEY = os.getenv("VLLM_API_KEY", "token-abc123") 
 
 # --- Redis Stream Name Prefix for responses ---
@@ -47,6 +51,7 @@ async def initialize_clients():
         await redis_client.ping()
         logger.info(f"Worker connected to Redis at {REDIS_HOST}:{REDIS_PORT}")
 
+        # Reuse a single httpx client for efficiency
         http_client = httpx.AsyncClient(timeout=httpx.Timeout(300.0, connect=10.0))
         logger.info("Worker HTTPX client initialized for vLLM requests.")
 
@@ -77,8 +82,16 @@ async def process_task(task_data: Dict[str, Any], r: redis.Redis, http_client: h
     max_tokens = task_data.get("max_tokens")
     temperature = task_data.get("temperature")
     is_streaming = task_data.get("stream", False)
+    
+    # --- NEW: Get the VLLM backend URL from the task data ---
+    vllm_backend_url = task_data.get("vllm_backend_url")
+    if not vllm_backend_url:
+        logger.error(f"Worker: Task {task_id} is missing 'vllm_backend_url'. Cannot process.")
+        await r.set(f"task:{task_id}:status", "failed", ex=3600)
+        await r.set(f"task:{task_id}:result", json.dumps({"error": "Missing vLLM backend URL in task data."}), ex=3600)
+        return
 
-    logger.info(f"Worker: Processing task_id: {task_id}, streaming: {is_streaming}")
+    logger.info(f"Worker: Processing task_id: {task_id}, model: {model_name}, streaming: {is_streaming}, target_vllm: {vllm_backend_url}")
 
     result_key = f"task:{task_id}:result"
     status_key = f"task:{task_id}:status"
@@ -95,7 +108,7 @@ async def process_task(task_data: Dict[str, Any], r: redis.Redis, http_client: h
             "stream": is_streaming # Tell vLLM whether to stream or not
         }
 
-        # NEW: Headers for vLLM API Key
+        # Headers for vLLM API Key
         vllm_headers = {
             "Authorization": f"Bearer {VLLM_API_KEY}"
         }
@@ -103,16 +116,16 @@ async def process_task(task_data: Dict[str, Any], r: redis.Redis, http_client: h
         if is_streaming:
             # --- Handle Streaming Request from Worker to vLLM ---
             response_stream_name = f"{STREAM_RESPONSE_PREFIX}{task_id}"
-            logger.info(f"Worker: Starting streaming request to vLLM for task_id: {task_id}")
+            logger.info(f"Worker: Starting streaming request to vLLM for task_id: {task_id} at {vllm_backend_url}")
             
             try:
                 # Use httpx.stream to consume vLLM's stream
                 # Pass headers to the httpx.stream call for API Key authentication
                 async with http_client.stream(
                     "POST", 
-                    VLLM_BACKEND_URL, 
+                    vllm_backend_url, # *** USE THE DYNAMIC URL HERE ***
                     json=vllm_payload, 
-                    headers=vllm_headers # <-- API KEY HEADER ADDED HERE
+                    headers=vllm_headers 
                 ) as vllm_response:
                     vllm_response.raise_for_status() # Check for HTTP errors from vLLM
 
@@ -175,12 +188,12 @@ async def process_task(task_data: Dict[str, Any], r: redis.Redis, http_client: h
 
         else:
             # --- Handle Non-Streaming Request ---
-            logger.info(f"Worker: Making non-streaming request to vLLM for task_id: {task_id}")
+            logger.info(f"Worker: Making non-streaming request to vLLM for task_id: {task_id} at {vllm_backend_url}")
             # Pass headers to the httpx.post call for API Key authentication
             response = await http_client.post(
-                VLLM_BACKEND_URL, 
+                vllm_backend_url, # *** USE THE DYNAMIC URL HERE ***
                 json=vllm_payload, 
-                headers=vllm_headers # <-- API KEY HEADER ADDED HERE
+                headers=vllm_headers 
             )
             response.raise_for_status()
             llm_result = response.json()
