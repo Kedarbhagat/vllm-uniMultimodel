@@ -10,41 +10,46 @@ import redis.asyncio as redis
 from fastapi import FastAPI, HTTPException, Depends, status, Request
 from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field
 
 # --- Configuration ---
 REDIS_HOST = os.getenv("REDIS_HOST", "172.31.21.186")
 REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
 API_PORT = int(os.getenv("API_PORT", 8082))
 
-# Model to backend mapping (Gateway now determines the backend URL to pass to the Worker)
-MODEL_TO_BACKEND: Dict[str, str] = {
-    "./meta-llama/Llama-3.1-8B-Instruct-awq": "http://172.31.21.186:8000/v1/chat/completions",
-    "./DeepSeek-Coder-V2-Lite-Instruct-awq": "http://172.31.21.186:8002/v1/chat/completions",
-    # Add other models as needed
+# Updated: Define model configurations with their respective backend URLs and queue names
+MODEL_CONFIG: Dict[str, Dict[str, str]] = {
+    "./meta-llama/Llama-3.1-8B-Instruct-awq": {
+        "backend_url": "http://172.31.21.186:8000/v1/chat/completions",
+        "queue_name": "llm_task_queue:llama3_1_8b"
+    },
+    "./DeepSeek-Coder-V2-Lite-Instruct-awq": {
+        "backend_url": "http://172.31.21.186:8002/v1/chat/completions",
+        "queue_name": "llm_task_queue:deepseek_v2_lite"
+    },
+    # Add other models with their specific backend and queue names if needed
 }
 
-# --- Redis Stream Name Prefix for responses ---
 STREAM_RESPONSE_PREFIX = "llm:response:stream:"
 
-# --- Logging Configuration ---
+# --- Logging ---
 logging.basicConfig(
-    level=logging.INFO, # Set to logging.DEBUG for more verbose streaming logs
+    level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger("api_gateway")
 
-# --- FastAPI App Initialization ---
+# --- FastAPI Initialization ---
 app = FastAPI(
-    title="vLLM API Gateway with Redis Queue for All Requests",
-    description="Gateway for LLM inference, routing all requests through Redis queues.",
+    title="vLLM API Gateway with Redis Queue",
+    description="Gateway for LLM inference, routing through Redis queues.",
     version="1.0.0"
 )
 
-# --- CORS Middleware ---
+# --- CORS ---
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # Be more restrictive in production for security
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -52,21 +57,19 @@ app.add_middleware(
 
 # --- Pydantic Models ---
 class ChatMessage(BaseModel):
-    role: str = Field(..., description="Role of the message sender (e.g., 'user', 'assistant', 'system').")
-    content: str = Field(..., description="Content of the message.")
+    role: str
+    content: str
 
 class ChatRequest(BaseModel):
-    model: str = Field(..., description="The model to use for completion.")
-    messages: List[ChatMessage] = Field(..., description="List of messages forming the conversation.")
-    temperature: Optional[float] = Field(default=0.7, ge=0.0, le=2.0, description="Sampling temperature.")
-    max_tokens: Optional[int] = Field(default=1024, ge=1, description="Maximum number of tokens to generate.")
-    stream: Optional[bool] = Field(default=False, description="Whether to stream the response (Server-Sent Events).")
-    # No stream_id here, it's generated internally by the gateway for streaming requests
+    model: str
+    messages: List[ChatMessage]
+    temperature: Optional[float] = 0.7
+    max_tokens: Optional[int] = 1024
+    stream: Optional[bool] = False
 
 class TaskResponse(BaseModel):
-    task_id: str = Field(..., description="Unique identifier for the asynchronous task.")
-    status: str = Field(..., description="Current status of the task.")
-    # For streaming, this will only contain task_id and status 'pending'
+    task_id: str
+    status: str
 
 # --- Global Redis Client ---
 redis_client: Optional[redis.Redis] = None
@@ -84,284 +87,227 @@ async def startup_event():
             socket_timeout=10
         )
         await redis_client.ping()
-        logger.info(f"Successfully connected to Redis at {REDIS_HOST}:{REDIS_PORT}")
-    except redis.RedisError as e:
-        logger.error(f"Failed to connect to Redis at {REDIS_HOST}:{REDIS_PORT}: {e}")
-        raise RuntimeError(f"Could not connect to Redis: {e}")
+        logger.info(f"Connected to Redis at {REDIS_HOST}:{REDIS_PORT}")
     except Exception as e:
-        logger.error(f"An unexpected error occurred during startup: {e}")
-        raise RuntimeError(f"Startup failed: {e}")
+        logger.error(f"Redis connection failed: {e}")
+        raise RuntimeError(f"Could not connect to Redis: {e}")
 
 @app.on_event("shutdown")
 async def shutdown_event():
     global redis_client
     if redis_client:
-        await redis_client.close()
+        await redis_client.aclose()
         logger.info("Redis connection closed.")
 
-# Dependency for Redis client
 async def get_redis_client_dep():
     if redis_client is None:
-        logger.error("Redis client not initialized when requested by dependency.")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Redis client not initialized.")
+        raise HTTPException(status_code=500, detail="Redis client not initialized.")
     return redis_client
 
-# --- API Endpoints ---
-
-@app.get("/health", status_code=status.HTTP_200_OK)
+# --- Health Check ---
+@app.get("/health", status_code=200)
 async def health_check():
-    """Basic health check endpoint. Checks Redis connectivity."""
-    try:
-        if redis_client:
+    if redis_client:
+        try:
             await redis_client.ping()
-        else:
-            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Redis client not initialized.")
-        return {"status": "ok", "redis_connected": True}
-    except redis.RedisError as e:
-        logger.error(f"Health check failed: Redis connection error: {e}")
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=f"Redis connection error: {e}")
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.exception(f"Unexpected error during health check: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Internal server error during health check: {str(e)}")
+            return {"status": "ok", "redis_connected": True}
+        except Exception as e:
+            raise HTTPException(status_code=503, detail=f"Redis error: {e}")
+    raise HTTPException(status_code=503, detail="Redis client not initialized.")
 
+# --- Main Endpoint ---
 @app.post("/v1/chat/completions", response_model=Union[TaskResponse, Dict[str, Any]])
 async def create_chat_completion(
     request: ChatRequest,
     r: redis.Redis = Depends(get_redis_client_dep)
 ):
-    """
-    Handles chat completions. All requests are queued to Redis.
-    Streaming requests subscribe to a Redis Stream for real-time chunks.
-    Non-streaming requests wait for the full response.
-    """
-    if request.model not in MODEL_TO_BACKEND:
-        logger.warning(f"Attempted request for unknown model: {request.model}")
+    # Retrieve model configuration including backend URL and queue name
+    model_config = MODEL_CONFIG.get(request.model)
+    if not model_config:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Unknown model: {request.model}. Available models: {list(MODEL_TO_BACKEND.keys())}"
+            status_code=400,
+            detail=f"Unknown model: {request.model}. Available models: {list(MODEL_CONFIG.keys())}"
         )
 
     task_id = str(uuid.uuid4())
-    # Retrieve the specific backend URL for the requested model
-    backend_url = MODEL_TO_BACKEND[request.model]
-    logger.info(f"Received request: stream={request.stream}, task_id: {task_id}, model: {request.model}, backend_url: {backend_url}")
+    backend_url = model_config["backend_url"]
+    queue_name = model_config["queue_name"] # Get the specific queue name for this model
 
-    # Prepare task data to be pushed to Redis queue
-    task_data = request.model_dump(mode='json')
-    task_data["task_id"] = task_id
-    task_data["stream"] = request.stream
-    # ADD THE SELECTED BACKEND URL TO THE TASK DATA
-    task_data["vllm_backend_url"] = backend_url 
+    task_data = request.dict()
+    task_data.update({
+        "task_id": task_id,
+        "vllm_backend_url": backend_url,
+        "original_model": request.model # Keep the original model name in task data
+    })
 
-    try:
-        # Push all requests to a common task queue
-        await r.rpush("llm_task_queue", json.dumps(task_data))
-        logger.info(f"Task {task_id} pushed to Redis 'llm_task_queue'.")
+    # Push the task to the model-specific queue
+    await r.rpush(queue_name, json.dumps(task_data))
+    logger.info(f"Task {task_id} queued to {queue_name}.")
 
-        if request.stream:
-            response_stream_name = f"{STREAM_RESPONSE_PREFIX}{task_id}"
-            logger.info(f"Setting up stream reader for task_id: {task_id} on stream: {response_stream_name}")
+    if request.stream:
+        stream_name = f"{STREAM_RESPONSE_PREFIX}{task_id}"
 
-            async def stream_from_redis_queue():
-                last_id = '0-0'
-                try:
-                    while True:
-                        messages = await r.xread(
-                            {response_stream_name: last_id},
-                            block=20000,
-                            count=1
-                        )
+        async def event_stream():
+            last_id = "0-0"
+            try:
+                # Set a reasonable timeout for the stream to exist initially
+                # The worker needs to create the stream. If it doesn't appear, something is wrong.
+                initial_wait_time = 30 # seconds
+                start_time = time.time()
+                stream_ready = False
+                while time.time() - start_time < initial_wait_time:
+                    if await r.exists(stream_name):
+                        stream_ready = True
+                        break
+                    await asyncio.sleep(0.1) # Check frequently at first
 
-                        if not messages:
-                            logger.debug(f"Gateway: Timeout waiting for stream {response_stream_name} chunk.")
-                            continue
-
-                        stream_messages = messages[0][1]
-                        for msg_id, fields in stream_messages:
-                            content_chunk = fields.get('content')
-                            is_done = fields.get('done') == 'true'
-                            is_error = fields.get('error') is not None
-
-                            if is_error:
-                                error_message = fields.get('error', 'Unknown error from worker.')
-                                logger.error(f"Gateway: Received error from worker for {task_id}: {error_message}")
-                                yield f"data: {json.dumps({'error': error_message, 'finish_reason': 'error'})}\n\n".encode('utf-8')
-                                yield b"data: [DONE]\n\n"
-                                await r.delete(response_stream_name)
-                                return
-                            
-                            if content_chunk:
-                                openai_chunk_payload = {
-                                    "id": f"chatcmpl-{task_id}",
-                                    "object": "chat.completion.chunk",
-                                    "created": int(time.time()),
-                                    "model": request.model,
-                                    "choices": [
-                                        {
-                                            "index": 0,
-                                            "delta": {
-                                                "content": content_chunk
-                                            },
-                                            "logprobs": None,
-                                            "finish_reason": None
-                                        }
-                                    ]
-                                }
-                                yield f"data: {json.dumps(openai_chunk_payload)}\n\n".encode('utf-8')
-                                logger.debug(f"Gateway: Yielded chunk for {task_id}. msg_id: {msg_id}")
-
-                            if is_done:
-                                yield b"data: [DONE]\n\n"
-                                logger.info(f"Gateway: Received [DONE] for stream {task_id}. Exiting stream.")
-                                await r.delete(response_stream_name)
-                                return
-
-                            last_id = msg_id
-
-                except asyncio.CancelledError:
-                    logger.info(f"Gateway: Streaming for {task_id} cancelled by client or timeout.")
-                except redis.RedisError as e:
-                    logger.error(f"Gateway: Redis error during stream reading for {task_id}: {e}")
-                    yield f"data: {json.dumps({'error': 'Redis stream error: ' + str(e), 'finish_reason': 'error'})}\n\n".encode('utf-8')
+                if not stream_ready:
+                    logger.error(f"Stream {stream_name} not created by worker within {initial_wait_time}s timeout.")
+                    yield f"data: {json.dumps({'error': 'Stream initiation timeout', 'finish_reason': 'error'})}\n\n".encode()
                     yield b"data: [DONE]\n\n"
-                except Exception as e:
-                    logger.exception(f"Gateway: Unexpected error in stream_from_redis_queue for {task_id}.")
-                    yield f"data: {json.dumps({'error': 'Internal gateway streaming error', 'finish_reason': 'error'})}\n\n".encode('utf-8')
-                    yield b"data: [DONE]\n\n"
+                    return
 
-            return StreamingResponse(
-                stream_from_redis_queue(),
-                media_type="text/event-stream",
-                headers={
-                    "Cache-Control": "no-cache",
-                    "Connection": "keep-alive",
-                    "X-Accel-Buffering": "no"
-                }
-            )
-        else:
-            logger.info(f"Non-streaming request for task_id: {task_id}. Waiting for result...")
-            result_key = f"task:{task_id}:result"
-            status_key = f"task:{task_id}:status"
-            
-            timeout_seconds = 300
-            start_time = time.time()
-
-            while True:
-                current_status = await r.get(status_key)
-
-                if current_status == "completed":
-                    result_data_str = await r.get(result_key)
-                    if result_data_str:
-                        full_openai_response = json.loads(result_data_str)
-                        logger.info(f"Non-streaming task {task_id} completed. Returning result.")
-                        
-                        await r.delete(result_key)
-                        await r.delete(status_key)
-                        return JSONResponse(content=full_openai_response)
-                    else:
-                        logger.error(f"Worker indicated completed for {task_id}, but no result data found in Redis.")
-                        raise HTTPException(
-                            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                            detail=f"Task completed, but result data for {task_id} is missing."
-                        )
-                elif current_status == "failed":
-                    error_data_str = await r.get(result_key)
-                    error_info = json.loads(error_data_str) if error_data_str else {"error": "Unknown worker error or no error details provided."}
-                    logger.error(f"Non-streaming task {task_id} failed: {error_info}")
+                while True:
+                    # Block for a long time, as the worker will push to this stream
+                    messages = await r.xread({stream_name: last_id}, block=20000, count=1)
+                    if not messages:
+                        # If block timed out, and no messages, continue waiting
+                        continue
                     
-                    await r.delete(result_key)
-                    await r.delete(status_key)
-                    raise HTTPException(
-                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                        detail=f"LLM inference failed for task {task_id}: {error_info.get('error', 'Unknown error')}"
-                    )
-                
-                if time.time() - start_time > timeout_seconds:
-                    logger.warning(f"Non-streaming task {task_id} timed out after {timeout_seconds} seconds.")
-                    await r.delete(status_key) 
-                    raise HTTPException(
-                        status_code=status.HTTP_504_GATEWAY_TIMEOUT,
-                        detail=f"LLM inference for task {task_id} timed out after {timeout_seconds} seconds."
-                    )
-                
-                await asyncio.sleep(0.5)
+                    # messages will be a list of tuples: [(stream_name, [(msg_id, fields), ...])]
+                    stream_msgs = messages[0][1]
+                    for msg_id, fields in stream_msgs:
+                        content = fields.get("content")
+                        is_done = fields.get("done") == "true"
+                        is_error = fields.get("error")
 
-    except redis.RedisError as e:
-        logger.error(f"Redis error when queuing or processing task {task_id}: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to queue or process task due to Redis error: {str(e)}"
-        )
-    except Exception as e:
-        logger.exception(f"Unexpected error when processing request for task {task_id}.")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Internal server error when processing task: {str(e)}"
+                        if is_error:
+                            logger.error(f"Worker reported error for task {task_id}: {is_error}")
+                            yield f"data: {json.dumps({'error': is_error, 'finish_reason': 'error'})}\n\n".encode()
+                            yield b"data: [DONE]\n\n"
+                            # Clean up the stream key after error
+                            await r.delete(stream_name)
+                            return
+
+                        if content:
+                            chunk = {
+                                "id": f"chatcmpl-{task_id}",
+                                "object": "chat.completion.chunk",
+                                "created": int(time.time()),
+                                "model": request.model,
+                                "choices": [{
+                                    "index": 0,
+                                    "delta": {"content": content},
+                                    "logprobs": None,
+                                    "finish_reason": None
+                                }]
+                            }
+                            yield f"data: {json.dumps(chunk)}\n\n".encode()
+
+                        if is_done:
+                            logger.info(f"Stream for task {task_id} completed.")
+                            yield b"data: [DONE]\n\n"
+                            # Clean up the stream key once done
+                            await r.delete(stream_name)
+                            return
+
+                        last_id = msg_id # Update last_id for the next read
+
+            except asyncio.CancelledError:
+                logger.warning(f"Client disconnected for stream task {task_id}.")
+            except Exception as e:
+                logger.exception(f"Stream error for {task_id}: {e}")
+                yield f"data: {json.dumps({'error': 'Stream error', 'finish_reason': 'error'})}\n\n".encode()
+                yield b"data: [DONE]\n\n"
+            finally:
+                # Ensure stream key is cleaned up even on unexpected exits
+                if await r.exists(stream_name):
+                    await r.delete(stream_name)
+
+        return StreamingResponse(
+            event_stream(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no" # Important for SSE with proxies like Nginx
+            }
         )
 
-@app.get("/v1/chat/result/{task_id}", response_model=Dict[str, Any])
-async def get_result(
-    task_id: str,
-    r: redis.Redis = Depends(get_redis_client_dep)
-):
-    """
-    Retrieves the result of a non-streaming asynchronous task from Redis.
-    """
-    logger.info(f"Fetching result for task_id: {task_id}")
-    try:
+    else:
+        # Non-streaming logic remains the same, as task_id keys are generic
         result_key = f"task:{task_id}:result"
         status_key = f"task:{task_id}:status"
+        timeout = 300 # seconds
+        start = time.time()
 
-        status = await r.get(status_key)
-        if not status:
-            logger.warning(f"Status not found for task_id: {task_id}")
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found or expired.")
+        await r.set(status_key, "pending", ex=timeout + 60) # Set initial status with extended expiry
 
-        if status == "completed" or status == "failed":
-            result_data_str = await r.get(result_key)
-            if result_data_str:
-                result = json.loads(result_data_str)
-                logger.info(f"Result for task_id {task_id}: Status={status}")
-                return {
-                    "task_id": task_id,
-                    "status": status,
-                    "result": result if status == "completed" else None,
-                    "error": result if status == "failed" else None
-                }
-            else:
-                logger.error(f"Result data missing for completed/failed task_id: {task_id}")
-                return {
-                    "task_id": task_id,
-                    "status": "failed",
-                    "error": "Result data missing after completion signal."
-                }
+        while True:
+            status = await r.get(status_key)
+            if status == "completed":
+                result_str = await r.get(result_key)
+                if result_str:
+                    await r.delete(result_key)
+                    await r.delete(status_key)
+                    return JSONResponse(content=json.loads(result_str))
+                # This case indicates a logic error where status is completed but result is missing
+                logger.error(f"Task {task_id} completed but result missing.")
+                raise HTTPException(status_code=500, detail=f"Task completed but result missing for {task_id}")
+            elif status == "failed":
+                error_str = await r.get(result_key) # Assuming result_key stores error message on failure
+                logger.error(f"Task {task_id} failed: {error_str}")
+                await r.delete(result_key)
+                await r.delete(status_key)
+                raise HTTPException(status_code=500, detail=f"Task failed: {error_str or 'Unknown error'}")
+            elif time.time() - start > timeout:
+                # If timeout, remove status key to prevent zombie tasks
+                logger.warning(f"Timeout for task {task_id}.")
+                await r.delete(status_key)
+                await r.delete(result_key) # Also remove result key in case worker partially wrote it
+                raise HTTPException(status_code=504, detail=f"Timeout for task {task_id}")
+            
+            # Add a small delay to prevent busy-waiting
+            await asyncio.sleep(0.5)
+
+# --- Result Retrieval (for non-streaming tasks that might be polled separately) ---
+@app.get("/v1/chat/result/{task_id}", response_model=Dict[str, Any])
+async def get_result(task_id: str, r: redis.Redis = Depends(get_redis_client_dep)):
+    status_key = f"task:{task_id}:status"
+    result_key = f"task:{task_id}:result"
+    status = await r.get(status_key)
+
+    if not status:
+        raise HTTPException(status_code=404, detail="Task not found or expired. Ensure it was a non-streaming request.")
+
+    result_str = await r.get(result_key)
+    
+    response_data = {
+        "task_id": task_id,
+        "status": status,
+        "result": None,
+        "error": None
+    }
+
+    if status == "completed":
+        if result_str:
+            response_data["result"] = json.loads(result_str)
+            # Optionally delete keys here if client polling is the final retrieval
+            # await r.delete(result_key)
+            # await r.delete(status_key)
         else:
-            logger.info(f"Task {task_id} status: {status}")
-            return {"task_id": task_id, "status": status}
+            response_data["error"] = "Result missing despite completed status."
+            logger.error(f"Result missing for completed task {task_id} during explicit retrieval.")
+    elif status == "failed":
+        response_data["error"] = result_str if result_str else "Unknown error during task execution."
+    else: # e.g., 'pending'
+        response_data["status"] = "pending" # Explicitly set for clarity if it's not completed/failed
+        response_data["message"] = "Task is still being processed."
 
-    except redis.RedisError as e:
-        logger.error(f"Redis error when fetching result for task {task_id}: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to retrieve result due to Redis error: {str(e)}"
-        )
-    except json.JSONDecodeError as e:
-        logger.error(f"JSON decode error for task {task_id} result: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to decode result data: {str(e)}"
-        )
-    except Exception as e:
-        logger.exception(f"Unexpected error when fetching result for task {task_id}.")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Internal server error when fetching task result: {str(e)}"
-        )
+    return response_data
 
-# --- Main Execution ---
+# --- Optional: Run directly ---
 if __name__ == "__main__":
-    logger.info(f"Starting FastAPI API Gateway on 0.0.0.0:{API_PORT}")
     import uvicorn
+    logger.info(f"Starting FastAPI API Gateway on 0.0.0.0:{API_PORT}")
     uvicorn.run(app, host="0.0.0.0", port=API_PORT)

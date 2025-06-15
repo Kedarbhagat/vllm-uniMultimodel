@@ -1,0 +1,5 @@
+{
+    "python.analysis.extraPaths": [
+        "./REDIS_MODEL"
+    ]
+}

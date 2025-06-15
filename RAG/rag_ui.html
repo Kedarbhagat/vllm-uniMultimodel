@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Streaming Document Assistant Chat</title>
+    <style>
+        body { font-family: sans-serif; margin: 20px; }
+        #chat-container { border: 1px solid #ccc; padding: 15px; border-radius: 8px; max-width: 700px; margin: 0 auto; }
+        #question-input { width: calc(100% - 100px); padding: 8px; margin-right: 10px; }
+        #send-button { padding: 8px 15px; cursor: pointer; }
+        #response-area { 
+            margin-top: 20px; 
+            padding: 10px; 
+            background-color: #f9f9f9; 
+            border-radius: 5px; 
+            min-height: 100px; 
+            white-space: pre-wrap; /* Preserves whitespace and line breaks */
+            overflow-y: auto; /* Adds scroll if content overflows */
+            max-height: 400px; /* Limit height */
+            border: 1px solid #eee;
+        }
+        .loading { color: #888; font-style: italic; }
+        .error { color: red; }
+    </style>
+</head>
+<body>
+    <div id="chat-container">
+        <h1>Streaming Document Assistant Chat</h1>
+        <p>First, ensure a document is uploaded via the `/upload-document/` endpoint (e.g., using Swagger UI at <a href="http://localhost:9000/docs" target="_blank">http://localhost:9000/docs</a>).</p>
+        <div>
+            <input type="text" id="question-input" placeholder="e.g., Summarize this document">
+            <button id="send-button">Ask</button>
+        </div>
+        <div id="response-area">
+            Waiting for your question...
+        </div>
+    </div>
+
+    <script>
+        const questionInput = document.getElementById('question-input');
+        const sendButton = document.getElementById('send-button');
+        const responseArea = document.getElementById('response-area');
+        const decoder = new TextDecoder('utf-8'); // To decode Uint8Array chunks to strings
+
+        sendButton.addEventListener('click', async () => {
+            const question = questionInput.value.trim();
+            if (!question) {
+                alert('Please enter a question!');
+                return;
+            }
+
+            responseArea.innerHTML = '<p class="loading">Thinking... Starting stream.</p>'; // Initial loading message
+            sendButton.disabled = true; // Disable button while processing
+
+            try {
+                const response = await fetch('http://localhost:9000/chat-stream/', { // Notice the /chat-stream/ endpoint
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'text/plain' // Expect plain text stream
+                    },
+                    body: JSON.stringify({ question: question })
+                });
+
+                if (!response.ok) {
+                    // If the initial HTTP response itself is not OK (e.g., 400 for no doc uploaded)
+                    const errorText = await response.text();
+                    let errorDetail = errorText;
+                    try {
+                        const errorJson = JSON.parse(errorText);
+                        errorDetail = errorJson.detail || errorText;
+                    } catch (e) {
+                        // Not JSON, use plain text
+                    }
+                    throw new Error(`HTTP error! Status: ${response.status}. Detail: ${errorDetail}`);
+                }
+
+                // Get a ReadableStreamDefaultReader to read chunks
+                const reader = response.body.getReader();
+                let streamedText = ''; // Accumulate streamed text
+
+                responseArea.innerHTML = ''; // Clear initial message to start displaying stream
+
+                while (true) {
+                    const { done, value } = await reader.read(); // Read a chunk
+                    if (done) {
+                        break; // Stream finished
+                    }
+                    // Decode the chunk (Uint8Array) to a string and append
+                    const chunk = decoder.decode(value, { stream: true });
+                    streamedText += chunk;
+                    responseArea.innerHTML = streamedText; // Update display with new chunk
+                    responseArea.scrollTop = responseArea.scrollHeight; // Auto-scroll to bottom
+                }
+
+            } catch (error) {
+                console.error('Fetch error:', error);
+                responseArea.innerHTML = `<p class="error">Failed to get response: ${error.message}</p>`;
+            } finally {
+                sendButton.disabled = false; // Re-enable button
+            }
+        });
+    </script>
+</body>
+</html>
