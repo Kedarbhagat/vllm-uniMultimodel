@@ -17,12 +17,7 @@ async def upload_document(file_path: str) -> str:
             print("✅ Document Uploaded:", data)
             return data["document_id"]
 
-async def stream_chat_response(
-    question: str,
-    document_id: Optional[str] = None,
-    session_id: Optional[str] = None,
-    enable_web_search: bool = False
-) -> tuple[str, Optional[str]]:
+async def stream_chat_response(document_id: str, question: str, session_id: str = None) -> str:
     """
     Streams a chat response from the FastAPI server.
     Returns the full concatenated response and the session_id (if received).
@@ -30,193 +25,176 @@ async def stream_chat_response(
     payload = {
         "question": question,
         "document_id": document_id,
-        "session_id": session_id,
         "stream": True,
-        "enable_web_search": enable_web_search
+        "session_id": session_id # Pass session_id if available
     }
     
     async with httpx.AsyncClient(timeout=None) as client:
         print(f"\n🧠 You: {question}")
-        print("💬 Assistant:", end="", flush=True)
+        print("💬 Assistant:", end="", flush=True) # Prepare for streaming output
         full_response = ""
-        new_session_id = session_id
-        
         try:
             async with client.stream("POST", f"{API_BASE}/chat/", json=payload) as response:
                 response.raise_for_status()
-                
                 async for line in response.aiter_lines():
-                    if line.strip() == "":
-                        continue
-                        
-                    if line.startswith("data:"):
-                        content_str = line[5:].strip()
-                        
-                        # Handle different response types
+                    processed_line = line.strip()
+                    if processed_line.startswith("data:"):
+                        content_str = processed_line.removeprefix("data:").strip()
                         if content_str == "[DONE]":
+                            print("\n✅ Streaming Complete")
                             break
-                            
                         try:
-                            data = json.loads(content_str)
-                            
-                            # Handle text responses
-                            if data.get("type") == "text":
-                                token = data.get("content", "")
-                                print(token, end="", flush=True)
-                                full_response += token
-                                
-                            # Handle tool responses
-                            elif data.get("type") == "tool_output" and data.get("tool") == "mermaid":
-                                diagram = data.get("content", "")
-                                print("\n🔷 Mermaid Diagram:\n", diagram, "\n")
-                                full_response += f"\nDiagram: {diagram}\n"
-                                
-                            # Handle session ID if provided
-                            if "session_id" in data:
-                                new_session_id = data["session_id"]
-                                
+                            token_data = json.loads(content_str)
+                            if "token" in token_data:
+                                print(token_data["token"], end="", flush=True)
+                                full_response += token_data["token"]
                         except json.JSONDecodeError:
-                            print(f"\n[CLIENT ERROR] Could not decode JSON: {content_str}")
-                            
-                return full_response, new_session_id
-                
+                            print(f"\n[CLIENT ERROR] Could not decode JSON: {content_str}", end="", flush=True)
+                return full_response
         except httpx.HTTPStatusError as e:
             print(f"\n❌ HTTP Error during streaming: {e.response.status_code} - {e.response.text}")
-            return "", session_id
+            return ""
         except httpx.RequestError as e:
             print(f"\n❌ Network Error during streaming: {e}")
-            return "", session_id
+            return ""
+
+async def get_session_id_from_chat_response(question: str, document_id: Optional[str] = None) -> Optional[str]:
+    """
+    Makes a non-streaming chat request to get an initial session ID.
+    This is a workaround for the streaming endpoint not returning session_id mid-stream.
+    Ideally, your streaming endpoint would send a session_id chunk.
+    """
+    payload = {
+        "question": question,
+        "document_id": document_id,
+        "stream": False # Request non-streaming to get the full JSON response
+    }
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.post(f"{API_BASE}/chat/", json=payload)
+            response.raise_for_status()
+            data = response.json()
+            return data.get("session_id")
+        except httpx.HTTPStatusError as e:
+            print(f"\n❌ Failed to get initial session ID: {e.response.status_code} - {e.response.text}")
+            return None
+        except httpx.RequestError as e:
+            print(f"\n❌ Network error getting initial session ID: {e}")
+            return None
 
 async def list_documents():
     """Lists all documents currently uploaded to the server."""
     async with httpx.AsyncClient() as client:
         response = await client.get(f"{API_BASE}/documents/")
         response.raise_for_status()
-        return response.json()
+        data = response.json()
+        print("\n📄 Uploaded Documents:")
+        if data:
+            for doc in data:
+                print(f"- ID: {doc['document_id']} | Filename: {doc['filename']} | Pages: {doc['pages']}")
+        else:
+            print("No documents uploaded.")
 
 async def delete_document(document_id: str):
     """Deletes a document from the server by its ID."""
     async with httpx.AsyncClient() as client:
         response = await client.delete(f"{API_BASE}/documents/{document_id}")
         response.raise_for_status()
-        return response.json()
+        print("🗑️ Document Deleted:", response.json())
 
 async def get_chat_history(session_id: str):
-    """Fetches chat history for a given session ID."""
+    """Fetches and displays chat history for a given session ID."""
     async with httpx.AsyncClient() as client:
-        response = await client.get(f"{API_BASE}/chat-history/{session_id}")
-        response.raise_for_status()
-        return response.json()
+        try:
+            response = await client.get(f"{API_BASE}/chat-history/{session_id}")
+            response.raise_for_status()
+            data = response.json()
+            print(f"\n📜 Chat History for Session ID: {data['session_id']}")
+            if data['history']:
+                for msg in data['history']:
+                    print(f"  {msg['type']}: {msg['content']}")
+            else:
+                print("  No history found for this session.")
+            return data['history']
+        except httpx.HTTPStatusError as e:
+            print(f"\n❌ Error fetching chat history: {e.response.status_code} - {e.response.text}")
+            return None
+        except httpx.RequestError as e:
+            print(f"\n❌ Network error fetching chat history: {e}")
+            return None
 
 async def clear_chat_history(session_id: str):
     """Clears chat history for a given session ID."""
     async with httpx.AsyncClient() as client:
-        response = await client.delete(f"{API_BASE}/chat-history/{session_id}")
-        response.raise_for_status()
-        return response.json()
+        try:
+            response = await client.delete(f"{API_BASE}/chat-history/{session_id}")
+            response.raise_for_status()
+            print("🗑️ Chat history cleared:", response.json())
+        except httpx.HTTPStatusError as e:
+            print(f"\n❌ Error clearing chat history: {e.response.status_code} - {e.response.text}")
+        except httpx.RequestError as e:
+            print(f"\n❌ Network error clearing chat history: {e}")
 
-async def display_chat_history(history):
-    """Displays formatted chat history."""
-    print(f"\n📜 Chat History (Session: {history['session_id']})")
-    for msg in history['history']:
-        prefix = "👤 You:" if msg['type'] == "human" else "🤖 AI:"
-        if msg.get('is_diagram'):
-            print(f"{prefix}\n```mermaid\n{msg['content']}\n```")
-        else:
-            print(f"{prefix} {msg['content']}")
 
 async def main_continuous_conversation():
-    """Main function for a continuous chat conversation with multiple modes."""
-    print("\n" + "="*50)
-    print("Enhanced RAG Chat System".center(50))
-    print("="*50)
-    print("\nChoose conversation mode:")
-    print("1. Document-based RAG")
-    print("2. Web Search assisted")
-    print("3. Regular chat")
-    
-    mode = input("\nSelect mode (1-3): ").strip()
+    """Main function for a continuous chat conversation in the terminal."""
+    file_path = input("Enter path to PDF/DOCX document (or leave empty to skip document upload): ").strip()
     document_id = None
-    enable_web_search = False
-    
-    if mode == "1":
-        file_path = input("Enter path to PDF/DOCX document: ").strip()
+    if file_path:
         if not os.path.exists(file_path):
-            print(f"❌ Error: Document not found at '{file_path}'")
+            print(f"❌ Error: Document not found at '{file_path}'. Please check the path.")
             return
         try:
             document_id = await upload_document(file_path)
-            print(f"✅ Document uploaded with ID: {document_id}")
+            print(f"Document uploaded with ID: {document_id}")
         except Exception as e:
             print(f"❌ Failed to upload document: {e}")
             return
-    elif mode == "2":
-        enable_web_search = True
-        print("🌐 Web Search mode enabled")
-    elif mode == "3":
-        print("💬 Regular chat mode")
-    else:
-        print("❌ Invalid mode selection")
-        return
 
     session_id = None
-    print("\n" + "-"*50)
-    print("Chat Commands:")
-    print("• 'exit' - End conversation")
-    print("• 'history' - View chat history")
-    print("• 'clear' - Clear current session")
-    print("• 'documents' - List uploaded documents")
-    print("• 'delete' - Delete current document")
-    print("-"*50 + "\n")
+    print("\n--- Start your continuous conversation ---")
+    print("Type 'exit' to end the chat.")
+    print("Type 'history' to view current session chat history.")
+    print("Type 'clear' to clear current session chat history.")
 
     while True:
-        question = input("\nYou: ").strip()
-        
-        # Handle commands
+        question = input("\n> ").strip()
         if question.lower() == 'exit':
             print("Ending conversation. Goodbye!")
             break
         elif question.lower() == 'history':
             if session_id:
-                history = await get_chat_history(session_id)
-                await display_chat_history(history)
+                await get_chat_history(session_id)
             else:
-                print("No active session to view history")
+                print("No active session yet to view history.")
             continue
         elif question.lower() == 'clear':
             if session_id:
                 await clear_chat_history(session_id)
-                session_id = None
-                print("Session cleared. Starting new conversation.")
+                session_id = None # Reset session_id after clearing
+                print("Chat history cleared. Starting a new conversation context.")
             else:
-                print("No active session to clear")
-            continue
-        elif question.lower() == 'documents':
-            docs = await list_documents()
-            print("\n📄 Uploaded Documents:")
-            for doc in docs:
-                print(f"- ID: {doc['document_id']} | {doc['filename']} ({doc['pages']} pages)")
-            continue
-        elif question.lower() == 'delete' and document_id:
-            await delete_document(document_id)
-            document_id = None
-            print("Document deleted. Continuing without document context.")
+                print("No active session to clear history for.")
             continue
         elif not question:
-            continue
-            
-        # Process the question
-        response, new_session_id = await stream_chat_response(
-            question=question,
-            document_id=document_id,
-            session_id=session_id,
-            enable_web_search=enable_web_search
-        )
-        
-        # Update session ID if we got a new one
-        if new_session_id and new_session_id != session_id:
-            session_id = new_session_id
-            print(f"\n🔗 Session ID: {session_id}")
+            continue # Don't send empty questions
+
+        # Get session_id on the first meaningful question if not already established
+        if session_id is None:
+            # We'll make a non-streaming request first to get the session_id
+            # This is a workaround as the current streaming endpoint doesn't return session_id mid-stream.
+            print("Establishing new session...")
+            temp_session_id = await get_session_id_from_chat_response(question, document_id)
+            if temp_session_id:
+                session_id = temp_session_id
+                print(f"🔗 New Session ID: {session_id}")
+            else:
+                print("⚠️ Failed to establish session. Conversation might not maintain context.")
+
+        if session_id: # Only proceed if a session_id was successfully established or passed
+            await stream_chat_response(document_id, question, session_id)
+        else:
+            print("Cannot proceed without a session ID. Please try again.")
 
     # Clean up
     if document_id:

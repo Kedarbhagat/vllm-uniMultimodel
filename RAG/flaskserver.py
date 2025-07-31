@@ -43,7 +43,7 @@ from new_agen import LangGraphAgenticRAG, llm_chat, llm_summary
 os.environ["LANGCHAIN_TRACING_V2"] = "true" # Enable LangSmith tracing for LangChain/LangGraph
 os.environ["LANGCHAIN_ENDPOINT"] = "https://api.smith.langchain.com"
 os.environ["LANGCHAIN_API_KEY"] = "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" # Replace with your actual key
-os.environ["LANGCHAIN_PROJECT"] = "vllm-enhanced-rag_new_Agent"
+os.environ["LANGCHAIN_PROJECT"] = "vllm-enhanced-rag_new_Agen"
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
