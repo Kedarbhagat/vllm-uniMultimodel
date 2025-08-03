@@ -1,24 +1,29 @@
 import os
 import logging
+import threading
+import shutil
+import time
 from pathlib import Path
 from typing import List, Optional, Dict
+from functools import lru_cache
+
+# We now import the embedding model directly here
+import torch
+from sentence_transformers import SentenceTransformer
+
 from langchain_community.vectorstores import Chroma
 from langchain_core.documents import Document
-from remote_embeddings import RemoteEmbeddings
-import threading
-from functools import lru_cache
+from langchain_community.embeddings import SentenceTransformerEmbeddings # Use this one instead of a remote one
 
 logger = logging.getLogger(__name__)
 
 # Directory structure
 BASE_DATA_DIR = "llm_net_data"
 VECTORSTORE_DIR = os.path.join(BASE_DATA_DIR, "vectorstores")
-
 Path(VECTORSTORE_DIR).mkdir(parents=True, exist_ok=True)
 
 class VectorStoreManager:
     """Singleton manager for vectorstores with caching"""
-    
     _instance = None
     _lock = threading.Lock()
     
@@ -35,11 +40,25 @@ class VectorStoreManager:
             self._vectorstore_cache: Dict[str, Chroma] = {}
             self._cache_lock = threading.Lock()
             self.initialized = True
+            self._init_embedder()
+            
+    def _init_embedder(self):
+        """Initializes the embedding model on first call"""
+        if self._embedder is None:
+            logging.info("Initializing local SentenceTransformer model...")
+            start_time = time.perf_counter()
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+            self._embedder = SentenceTransformerEmbeddings(
+                model_name="all-MiniLM-L6-v2",
+                model_kwargs={'device': device}
+            )
+            end_time = time.perf_counter()
+            logging.info(f"Embedding model loaded locally in {end_time - start_time:.3f} seconds.")
     
-    def get_embedder(self) -> RemoteEmbeddings:
+    def get_embedder(self) -> SentenceTransformerEmbeddings:
         """Get singleton embedding instance"""
         if self._embedder is None:
-            self._embedder = RemoteEmbeddings(base_url="http://localhost:9096")
+            self._init_embedder()
         return self._embedder
     
     def _get_cache_key(self, thread_id: str, document_id: str) -> str:
@@ -54,17 +73,14 @@ class VectorStoreManager:
                 logger.info(f"Retrieved vectorstore from cache: {cache_key}")
                 return self._vectorstore_cache[cache_key]
         
-        # Load vectorstore if not in cache
         vectorstore = self._load_vectorstore_internal(thread_id, document_id)
         if vectorstore:
             with self._cache_lock:
-                # Implement LRU-like behavior - keep only last 10 vectorstores
                 if len(self._vectorstore_cache) >= 10:
-                    # Remove oldest entry
                     oldest_key = next(iter(self._vectorstore_cache))
                     del self._vectorstore_cache[oldest_key]
                     logger.info(f"Evicted vectorstore from cache: {oldest_key}")
-                
+                    
                 self._vectorstore_cache[cache_key] = vectorstore
                 logger.info(f"Cached vectorstore: {cache_key}")
         
@@ -154,7 +170,6 @@ def build_vectorstore(
         vectorstore.persist()
         logger.info(f"Stored {len(non_empty_docs)} chunks in {collection_name}")
         
-        # Cache the newly created vectorstore
         cache_key = vectorstore_manager._get_cache_key(thread_id, document_id)
         with vectorstore_manager._cache_lock:
             vectorstore_manager._vectorstore_cache[cache_key] = vectorstore
@@ -181,11 +196,9 @@ def delete_vectorstore(thread_id: str, document_id: str) -> bool:
             logger.warning(f"Directory not found: {persist_dir}")
             return False
 
-        import shutil
         shutil.rmtree(persist_dir)
         logger.info(f"Deleted vectorstore: {persist_dir}")
         
-        # Invalidate cache
         vectorstore_manager.invalidate_cache(thread_id, document_id)
         return True
 
@@ -193,7 +206,6 @@ def delete_vectorstore(thread_id: str, document_id: str) -> bool:
         logger.error(f"Failed to delete vectorstore: {e}", exc_info=True)
         return False
 
-# Utility functions for cache management
 def clear_vectorstore_cache():
     """Clear all cached vectorstores"""
     vectorstore_manager.clear_cache()

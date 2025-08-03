@@ -1,5 +1,6 @@
 import json
 import datetime
+import time
 from typing import Optional
 from fastapi import Form, UploadFile, File, HTTPException, logger
 from pathlib import Path 
@@ -12,6 +13,7 @@ from langchain.schema import Document as LangchainDocument
 from langchain_core.prompts import PromptTemplate
 
 from langchain_openai import ChatOpenAI
+import requests
 
 from vectorestore import build_vectorstore
 from wordloader import process_document 
@@ -167,6 +169,8 @@ async def upload_document(thread_id: str = Form(), file: UploadFile = File(...))
 
 
 
+
+
 # Add this schema class with your other schemas
 class TestVectorstoreInput(BaseModel):
     thread_id: str
@@ -175,16 +179,14 @@ class TestVectorstoreInput(BaseModel):
 
 # Fixed test endpoint
 @app.post("/chat/test_vectorstore")
+@app.post("/chat/test_vectorstore")
 async def test_vectorstore(data: TestVectorstoreInput):
-    """Test if documents were properly vectorized with detailed debugging"""
     thread_id = data.thread_id
     document_id = data.document_id
-    query=data.query
+    query = data.query
     
     try:
-        # 1. Check if vectorstore directory exists
         thread_vectorstore_dir = os.path.join(VECTORSTORE_DIR, thread_id)
-        print(f"Looking for vectorstore in: {thread_vectorstore_dir}")
         
         if not os.path.exists(thread_vectorstore_dir):
             return {
@@ -193,34 +195,27 @@ async def test_vectorstore(data: TestVectorstoreInput):
                 "available_threads": os.listdir(VECTORSTORE_DIR) if os.path.exists(VECTORSTORE_DIR) else []
             }
         
-        # 2. List contents of the thread directory
         thread_contents = os.listdir(thread_vectorstore_dir)
-        print(f"Thread directory contents: {thread_contents}")
         
-        # 3. Try to load the vectorstore
-
-        import time
-
         start = time.perf_counter()
         vectorstore = load_vectorstore(thread_id, document_id)
         load_time = time.perf_counter() - start
+        
         if not vectorstore:
             return {
                 "status": "error",
                 "message": "load_vectorstore returned None",
                 "thread_directory": thread_vectorstore_dir,
-                "thread_contents": thread_contents,
-                "debug_info": {
-                    "thread_id": thread_id,
-                    "document_id": document_id,
-                    "vectorstore_dir": VECTORSTORE_DIR
-                }
+                "thread_contents": thread_contents
             }
-
-        # 4. Get collection stats
-        collection = vectorstore._collection
         
-        # Safe metadata access
+      
+            
+        start = time.perf_counter()
+        results = vectorstore.similarity_search(query, k=5)
+        search_time = time.perf_counter() - start
+
+        collection = vectorstore._collection
         all_data = collection.get()
         metadatas = all_data.get("metadatas", [])
         documents = all_data.get("documents", [])
@@ -230,21 +225,16 @@ async def test_vectorstore(data: TestVectorstoreInput):
             "metadata_fields": list(metadatas[0].keys()) if metadatas and metadatas[0] else [],
             "sample_chunk": documents[0][:100] + "..." if documents else "No documents found"
         }
-
-        # 5. Test similarity search
-        start = time.perf_counter()
-        test_query = query
-        
-        results = vectorstore.similarity_search(test_query, k=5)
-        search_time = time.perf_counter() - start
-        print(f"Vectorstore load time: {load_time:.3f}s, similarity search time: {search_time:.3f}s")
-
         
         return {
             "status": "success",
             "stats": stats,
+            "timings": {
+                "vectorstore_load_time": f"{load_time:.3f}s",
+                "similarity_search_time": f"{search_time:.3f}s"
+            },
             "test_query_results": {
-                "query": test_query,
+                "query": query,
                 "top_match": results[0].page_content[:200] + "..." if results else "No results",
                 "metadata": results[0].metadata if results else {}
             },
@@ -253,19 +243,14 @@ async def test_vectorstore(data: TestVectorstoreInput):
                 "thread_contents": thread_contents
             }
         }
-
     except Exception as e:
         return {
             "status": "error",
             "message": f"Test failed: {str(e)}",
-            "error_type": type(e).__name__,
-            "debug_info": {
-                "thread_id": thread_id,
-                "document_id": document_id,
-                "vectorstore_dir": VECTORSTORE_DIR,
-                "thread_vectorstore_dir": os.path.join(VECTORSTORE_DIR, thread_id)
-            }
+            "error_type": type(e).__name__
         }
+
+
 # ---------- Simple RAG Endpoint ----------
 
 @app.post("/chat/rag")
