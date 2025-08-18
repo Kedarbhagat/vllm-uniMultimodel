@@ -5,15 +5,11 @@ import shutil
 import time
 from pathlib import Path
 from typing import List, Optional, Dict
-from functools import lru_cache
 
-# We now import the embedding model directly here
 import torch
-from sentence_transformers import SentenceTransformer
-
 from langchain_community.vectorstores import Chroma
 from langchain_core.documents import Document
-from langchain_community.embeddings import SentenceTransformerEmbeddings # Use this one instead of a remote one
+from langchain_huggingface import HuggingFaceEmbeddings  # ✅ Updated import
 
 logger = logging.getLogger(__name__)
 
@@ -22,18 +18,19 @@ BASE_DATA_DIR = "llm_net_data"
 VECTORSTORE_DIR = os.path.join(BASE_DATA_DIR, "vectorstores")
 Path(VECTORSTORE_DIR).mkdir(parents=True, exist_ok=True)
 
+
 class VectorStoreManager:
     """Singleton manager for vectorstores with caching"""
     _instance = None
     _lock = threading.Lock()
-    
+
     def __new__(cls):
         if cls._instance is None:
             with cls._lock:
                 if cls._instance is None:
                     cls._instance = super().__new__(cls)
         return cls._instance
-    
+
     def __init__(self):
         if not hasattr(self, 'initialized'):
             self._embedder = None
@@ -41,38 +38,38 @@ class VectorStoreManager:
             self._cache_lock = threading.Lock()
             self.initialized = True
             self._init_embedder()
-            
+
     def _init_embedder(self):
         """Initializes the embedding model on first call"""
         if self._embedder is None:
-            logging.info("Initializing local SentenceTransformer model...")
+            logging.info("Initializing local HuggingFace embedding model...")
             start_time = time.perf_counter()
             device = "cuda" if torch.cuda.is_available() else "cpu"
-            self._embedder = SentenceTransformerEmbeddings(
+            self._embedder = HuggingFaceEmbeddings(
                 model_name="all-MiniLM-L6-v2",
                 model_kwargs={'device': device}
             )
             end_time = time.perf_counter()
             logging.info(f"Embedding model loaded locally in {end_time - start_time:.3f} seconds.")
-    
-    def get_embedder(self) -> SentenceTransformerEmbeddings:
+
+    def get_embedder(self) -> HuggingFaceEmbeddings:
         """Get singleton embedding instance"""
         if self._embedder is None:
             self._init_embedder()
         return self._embedder
-    
+
     def _get_cache_key(self, thread_id: str, document_id: str) -> str:
         return f"{thread_id}_{document_id}"
-    
+
     def get_vectorstore(self, thread_id: str, document_id: str) -> Optional[Chroma]:
         """Get vectorstore from cache or load it"""
         cache_key = self._get_cache_key(thread_id, document_id)
-        
+
         with self._cache_lock:
             if cache_key in self._vectorstore_cache:
                 logger.info(f"Retrieved vectorstore from cache: {cache_key}")
                 return self._vectorstore_cache[cache_key]
-        
+
         vectorstore = self._load_vectorstore_internal(thread_id, document_id)
         if vectorstore:
             with self._cache_lock:
@@ -80,12 +77,12 @@ class VectorStoreManager:
                     oldest_key = next(iter(self._vectorstore_cache))
                     del self._vectorstore_cache[oldest_key]
                     logger.info(f"Evicted vectorstore from cache: {oldest_key}")
-                    
+
                 self._vectorstore_cache[cache_key] = vectorstore
                 logger.info(f"Cached vectorstore: {cache_key}")
-        
+
         return vectorstore
-    
+
     def _load_vectorstore_internal(self, thread_id: str, document_id: str) -> Optional[Chroma]:
         """Internal method to load vectorstore from disk"""
         try:
@@ -101,7 +98,7 @@ class VectorStoreManager:
 
             logger.info(f"Loading vectorstore from disk: {collection_name}")
             embedder = self.get_embedder()
-            
+
             vectorstore = Chroma(
                 collection_name=collection_name,
                 embedding_function=embedder,
@@ -118,7 +115,7 @@ class VectorStoreManager:
         except Exception as e:
             logger.error(f"Error loading vectorstore: {e}", exc_info=True)
             return None
-    
+
     def invalidate_cache(self, thread_id: str, document_id: str):
         """Remove vectorstore from cache"""
         cache_key = self._get_cache_key(thread_id, document_id)
@@ -126,24 +123,24 @@ class VectorStoreManager:
             if cache_key in self._vectorstore_cache:
                 del self._vectorstore_cache[cache_key]
                 logger.info(f"Invalidated cache for: {cache_key}")
-    
+
     def clear_cache(self):
         """Clear all cached vectorstores"""
         with self._cache_lock:
             self._vectorstore_cache.clear()
             logger.info("Cleared all vectorstore cache")
 
+
 # Global manager instance
 vectorstore_manager = VectorStoreManager()
+
 
 def build_vectorstore(
     docs: List[Document],
     thread_id: str,
     document_id: str,
 ) -> Optional[Chroma]:
-    """
-    Build a Chroma vectorstore for a single document under a thread.
-    """
+    """Build a Chroma vectorstore for a single document under a thread."""
     try:
         if not thread_id or not document_id:
             raise ValueError("Both thread_id and document_id are required")
@@ -169,27 +166,25 @@ def build_vectorstore(
 
         vectorstore.persist()
         logger.info(f"Stored {len(non_empty_docs)} chunks in {collection_name}")
-        
+
         cache_key = vectorstore_manager._get_cache_key(thread_id, document_id)
         with vectorstore_manager._cache_lock:
             vectorstore_manager._vectorstore_cache[cache_key] = vectorstore
-        
+
         return vectorstore
 
     except Exception as e:
         logger.error(f"Failed to build vectorstore: {e}", exc_info=True)
         return None
 
+
 def load_vectorstore(thread_id: str, document_id: str) -> Optional[Chroma]:
-    """
-    Load a Chroma vectorstore for a specific document (with caching).
-    """
+    """Load a Chroma vectorstore for a specific document (with caching)."""
     return vectorstore_manager.get_vectorstore(thread_id, document_id)
 
+
 def delete_vectorstore(thread_id: str, document_id: str) -> bool:
-    """
-    Delete a Chroma vectorstore for a document.
-    """
+    """Delete a Chroma vectorstore for a document."""
     try:
         persist_dir = os.path.join(VECTORSTORE_DIR, thread_id, document_id)
         if not os.path.exists(persist_dir):
@@ -198,7 +193,7 @@ def delete_vectorstore(thread_id: str, document_id: str) -> bool:
 
         shutil.rmtree(persist_dir)
         logger.info(f"Deleted vectorstore: {persist_dir}")
-        
+
         vectorstore_manager.invalidate_cache(thread_id, document_id)
         return True
 
@@ -206,12 +201,14 @@ def delete_vectorstore(thread_id: str, document_id: str) -> bool:
         logger.error(f"Failed to delete vectorstore: {e}", exc_info=True)
         return False
 
+
 def clear_vectorstore_cache():
-    """Clear all cached vectorstores"""
+    """Clear all cached vectorstores."""
     vectorstore_manager.clear_cache()
 
+
 def get_cache_stats():
-    """Get cache statistics"""
+    """Get cache statistics."""
     with vectorstore_manager._cache_lock:
         return {
             "cached_vectorstores": len(vectorstore_manager._vectorstore_cache),

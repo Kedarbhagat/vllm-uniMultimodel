@@ -11,7 +11,7 @@ from langgraph.graph.message import add_messages
 from langgraph.checkpoint.memory import MemorySaver
 from langchain_openai import ChatOpenAI
 
-from dbhelper import get_or_create_user, create_thread, add_message, get_messages_by_thread
+#from dbhelper import get_or_create_user, create_thread, add_message, get_messages_by_thread
 
 # --- LLM ---
 os.environ["OPENAI_API_KEY"] = os.getenv("OPENAI_API_KEY", "token-abc123")
@@ -36,7 +36,8 @@ DEFAULT_MODEL = "llama"
 
 # --- Prompt Template ---
 prompt_template = ChatPromptTemplate.from_messages([
-    ("system", "You are a helpful assistant."),
+    ("system",'''You are a helpful assistant. conversational in your responses. ask followup questions if needed. 
+     complete the each response within 1200 tokens and ask if the user needs a detailed response.'''),
     MessagesPlaceholder(variable_name="chat_history"),
     ("human", "{input}")
 ]).partial(current_time=lambda: datetime.datetime.now().strftime("%A, %B %d, %Y at %I:%M:%S %p IST"))
@@ -52,7 +53,7 @@ class ConversationalAgent:
             openai_api_base=f"{API_GATEWAY_URL}/v1",
             openai_api_key=os.getenv("YOUR_API_KEY", "token-abc123"),
             temperature=0.7,
-            max_tokens=2048,
+            max_tokens=1500,
             streaming=True,
         )
         self.prompt_template = prompt_template
@@ -120,7 +121,7 @@ def reconstruct_history(raw_messages):
             history.append(AIMessage(content=msg["content"]))
     return history
 
-def run_chat():
+#def run_chat():
     print("🧠 AI Assistant - Conversational Mode")
     email = input("Enter your email: ").strip() or "anonymous@example.com"
     user_id = get_or_create_user(email)
@@ -157,4 +158,5 @@ def run_chat():
                 add_message(thread_id, role="ai", content=msg.content)
 
 if __name__ == "__main__":
-    run_chat()
+    #run_chat()
+    print("This module is not meant to be run directly. Use the server.py to start the application.")

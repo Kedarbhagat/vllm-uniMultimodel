@@ -56,16 +56,20 @@ class AgentState(TypedDict):
     needs_full_document_processing: bool
     full_document_content: str
     document_path: Optional[str]
+    thread_id: str  # Added to track thread context
+    document_id: str  # Added to track document context
     documents: Optional[List[Document]]  # Added to pass pre-chunked documents
 
 
 # --- LangGraphAgenticRAG Class ---
 class LangGraphAgenticRAG:
-    def __init__(self, llm_chat: ChatOpenAI, llm_summary: ChatOpenAI, vectorstore, embedding_model):
+    def __init__(self, llm_chat: ChatOpenAI, llm_summary: ChatOpenAI, vectorstore, embedding_model,thread_id: str, document_id: str):
         self.llm_chat = llm_chat
         self.llm_summary = llm_summary
         self.vectorstore = vectorstore
         self.embedding_model = embedding_model
+        self.thread_id=thread_id
+        self.document_id=document_id
         # REMOVED: self.chat_history: List[BaseMessage] = []
         self.last_used_full_document: bool = False  # Retained for context_used tracking in FastAPI
 
