@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Send, Upload, FileText, User, Bot, Settings, MessageCircle, Plus, LogOut, Moon, Sun, AlertCircle } from 'lucide-react';
+import { Send, Upload, FileText, User, Bot, Settings, MessageCircle, Plus, LogOut, Moon, Sun, AlertCircle, Loader2 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
@@ -531,7 +531,16 @@ const ChatFrontend = () => {
     }
   }, []);
 
-  // Fixed MessageBubble component with proper code block separation
+  // --- Enhanced Streaming Indicator ---
+  const StreamingDots = () => (
+    <span className="inline-flex items-center ml-2">
+      <span className="w-2 h-2 bg-blue-400 rounded-full animate-bounce"></span>
+      <span className="w-2 h-2 bg-blue-400 rounded-full animate-bounce mx-1" style={{ animationDelay: '0.15s' }}></span>
+      <span className="w-2 h-2 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: '0.3s' }}></span>
+    </span>
+  );
+
+  // --- Enhanced MessageBubble ---
   const MessageBubble = React.memo(({ message }) => {
     const isUser = message.role === "human";
     const isSystem = message.role === "system";
@@ -565,16 +574,13 @@ const ChatFrontend = () => {
               language={language || 'text'}
               PreTag="div"
               customStyle={{
-                borderRadius: "0.5rem",
-                fontSize: "0.9em",
-                padding: "1em",
+                borderRadius: "0.75rem",
+                fontSize: "1em",
+                padding: "1.2em",
                 margin: 0,
-                background: "#1e1e1e",
+                background: "#18181b",
                 border: "1px solid #374151",
                 userSelect: "text",
-                WebkitUserSelect: "text",
-                MozUserSelect: "text",
-                msUserSelect: "text",
               }}
               codeTagProps={{
                 style: {
@@ -599,7 +605,7 @@ const ChatFrontend = () => {
               const language = /language-(\w+)/.exec(className || "")?.[1];
               return inline ? (
                 <code
-                  className="bg-gray-100 dark:bg-gray-800 rounded px-1 font-mono text-[0.85em] text-pink-700 dark:text-pink-300"
+                  className="bg-gray-100 dark:bg-gray-800 rounded px-1 font-mono text-[0.95em] text-pink-700 dark:text-pink-300"
                   style={{ userSelect: "text", background: "rgb(243 244 246)" }}
                   {...props}
                 >
@@ -635,7 +641,7 @@ const ChatFrontend = () => {
             const language = /language-(\w+)/.exec(className || "")?.[1];
             return inline ? (
               <code
-                className="bg-blue-400/20 rounded px-1 font-mono text-[0.85em] text-blue-100"
+                className="bg-blue-400/20 rounded px-1 font-mono text-[0.95em] text-blue-100"
                 style={{ userSelect: "text" }}
                 {...props}
               >
@@ -666,7 +672,7 @@ const ChatFrontend = () => {
             const language = /language-(\w+)/.exec(className || "")?.[1];
             return inline ? (
               <code
-                className="bg-orange-200 dark:bg-orange-800 rounded px-1 font-mono text-[0.85em] text-orange-800 dark:text-orange-200"
+                className="bg-orange-200 dark:bg-orange-800 rounded px-1 font-mono text-[0.95em] text-orange-800 dark:text-orange-200"
                 style={{ userSelect: "text" }}
                 {...props}
               >
@@ -689,81 +695,52 @@ const ChatFrontend = () => {
       </ReactMarkdown>
     );
 
+    // --- Modern Bubble Layout (NO ICONS, ALIGNED, NO AI BUBBLE) ---
     if (isAI) {
       return (
-        <div className="message-bubble flex mb-6 justify-start">
-          <div className="flex-shrink-0 w-8 h-8 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full flex items-center justify-center mr-3">
-            <Bot className="w-4 h-4 text-white" />
-          </div>
-          <div 
-            className="flex-1 min-w-0 max-w-4xl"
-            style={{ userSelect: "text" }}
-          >
-            <div 
-              className="text-sm leading-relaxed text-gray-900 dark:text-gray-100"
-              style={{ userSelect: "text", background: "transparent" }}
+        <div className="flex w-full mb-4 justify-start">
+          <div className="max-w-3xl w-full">
+            <div
+              className="text-base text-gray-900 dark:text-gray-100 transition-all"
+              style={{
+                background: "transparent",
+                lineHeight: "2",
+                letterSpacing: "0.01em",
+                boxShadow: "none",
+                border: "none",
+                borderRadius: 0,
+                padding: 0,
+              }}
             >
               {renderAIMarkdown(message.content)}
+              {message.streaming && <StreamingDots />}
             </div>
-            {message.streaming && (
-              <div className="inline-flex items-center mt-2">
-                <div className="w-2 h-2 bg-blue-400 rounded-full animate-pulse"></div>
-                <div className="w-2 h-2 bg-blue-400 rounded-full animate-pulse ml-1 delay-75"></div>
-                <div className="w-2 h-2 bg-blue-400 rounded-full animate-pulse ml-1 delay-150"></div>
-              </div>
-            )}
-            <div className="text-xs mt-2 text-gray-500 dark:text-gray-400">
-              {formatTimestamp(message.timestamp)}
+            <div className="text-xs mt-2 text-gray-400 dark:text-gray-500 pl-2">
+              {message.timestamp && new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
             </div>
           </div>
         </div>
       );
     }
 
-    return (
-      <div className={`message-bubble flex mb-6 ${isUser ? "justify-end" : "justify-start"}`}>
-        {!isUser && !isSystem && (
-          <div className="flex-shrink-0 w-8 h-8 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full flex items-center justify-center mr-3">
-            <Bot className="w-4 h-4 text-white" />
-          </div>
-        )}
-
-        <div
-          className={`max-w-xs lg:max-w-md px-4 py-3 rounded-2xl relative ${
-            isUser
-              ? "bg-gradient-to-br from-blue-500 to-blue-600 text-white"
-              : isSystem
-              ? "bg-gradient-to-br from-orange-100 to-orange-200 text-orange-800 dark:bg-orange-900 dark:text-orange-100 border border-orange-300 dark:border-orange-700"
-              : "bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-100 shadow-lg border border-gray-100 dark:border-gray-700"
-          }`}
-          style={{ userSelect: "text" }}
-        >
-          <div 
-            className="text-sm leading-relaxed"
-            style={{ userSelect: "text", background: "transparent" }}
-          >
-            {isUser ? renderUserMarkdown(message.content) : 
-             isSystem ? renderSystemMarkdown(message.content) : 
-             renderAIMarkdown(message.content)}
-          </div>
-          <div
-            className={`text-xs mt-2 ${
-              isUser
-                ? "text-blue-100"
-                : isSystem
-                ? "text-orange-600 dark:text-orange-200"
-                : "text-gray-500 dark:text-gray-400"
-            }`}
-          >
-            {formatTimestamp(message.timestamp)}
+    if (isUser) {
+      return (
+        <div className="flex w-full mb-4 justify-end">
+          <div className="max-w-3xl w-full flex justify-end">
+            <div className="bg-gradient-to-br from-blue-500 to-purple-600 text-white rounded-3xl px-7 py-5 shadow-xl text-base transition-all">
+              {renderUserMarkdown(message.content)}
+            </div>
           </div>
         </div>
+      );
+    }
 
-        {isUser && (
-          <div className="flex-shrink-0 w-8 h-8 bg-gradient-to-br from-green-500 to-emerald-600 rounded-full flex items-center justify-center ml-3">
-            <User className="w-4 h-4 text-white" />
-          </div>
-        )}
+    // System message
+    return (
+      <div className="flex w-full mb-4 justify-center">
+        <div className="bg-gradient-to-br from-orange-100 to-orange-200 dark:from-orange-900 dark:to-orange-800 text-orange-800 dark:text-orange-100 border border-orange-300 dark:border-orange-700 rounded-2xl px-6 py-3 text-sm shadow">
+          {renderSystemMarkdown(message.content)}
+        </div>
       </div>
     );
   });
@@ -893,9 +870,10 @@ const ChatFrontend = () => {
     );
   }
 
+  // --- Enhanced Main Chat Area ---
   return (
     <ErrorBoundary>
-      <div className="flex h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-950 relative">
+      <div className="flex h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-zinc-900 dark:to-zinc-950 relative">
         {/* Toast notifications */}
         {toast && (
           <Toast 
@@ -906,20 +884,19 @@ const ChatFrontend = () => {
         )}
 
         {/* Sidebar */}
-        <div className="w-80 bg-white dark:bg-gray-900 shadow-xl border-r border-gray-200 dark:border-gray-800 flex flex-col">
-          <div className="p-6 border-b border-gray-200 dark:border-gray-800">
-            <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
-              LLMNet 
+        <div className="w-80 bg-white dark:bg-zinc-900 shadow-2xl border-r border-zinc-200 dark:border-zinc-800 flex flex-col">
+          <div className="p-7 border-b border-zinc-200 dark:border-zinc-800">
+            <h1 className="text-3xl font-extrabold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent tracking-tight drop-shadow">
+              LLMNet
             </h1>
-            
             {/* Mode Toggle */}
-            <div className="flex mt-4 bg-gray-100 dark:bg-gray-800 rounded-lg p-1">
+            <div className="flex mt-6 bg-zinc-100 dark:bg-zinc-800 rounded-xl p-1 shadow-inner">
               <button
                 onClick={() => setActiveMode('chat')}
-                className={`flex-1 py-2 px-4 rounded-md text-sm font-medium transition-all ${
+                className={`flex-1 py-2 px-4 rounded-lg text-base font-semibold transition-all ${
                   activeMode === 'chat'
-                    ? 'bg-white dark:bg-gray-900 text-blue-600 dark:text-blue-400 shadow-sm'
-                    : 'text-gray-600 dark:text-gray-300 hover:text-gray-800 dark:hover:text-white'
+                    ? 'bg-white dark:bg-zinc-900 text-blue-600 dark:text-blue-400 shadow'
+                    : 'text-zinc-600 dark:text-zinc-300 hover:text-zinc-800 dark:hover:text-white'
                 }`}
               >
                 <MessageCircle className="w-4 h-4 inline mr-2" />
@@ -927,10 +904,10 @@ const ChatFrontend = () => {
               </button>
               <button
                 onClick={() => setActiveMode('rag')}
-                className={`flex-1 py-2 px-4 rounded-md text-sm font-medium transition-all ${
+                className={`flex-1 py-2 px-4 rounded-lg text-base font-semibold transition-all ${
                   activeMode === 'rag'
-                    ? 'bg-white dark:bg-gray-900 text-purple-600 dark:text-purple-400 shadow-sm'
-                    : 'text-gray-600 dark:text-gray-300 hover:text-gray-800 dark:hover:text-white'
+                    ? 'bg-white dark:bg-zinc-900 text-purple-600 dark:text-purple-400 shadow'
+                    : 'text-zinc-600 dark:text-zinc-300 hover:text-zinc-800 dark:hover:text-white'
                 }`}
               >
                 <FileText className="w-4 h-4 inline mr-2" />
@@ -940,11 +917,11 @@ const ChatFrontend = () => {
           </div>
 
           {/* New Chat Button */}
-          <div className="p-4">
+          <div className="p-5">
             <button
               onClick={createNewThread}
               disabled={isLoading}
-              className="w-full bg-gradient-to-r from-blue-500 to-purple-600 text-white py-3 px-4 rounded-lg font-medium hover:from-blue-600 hover:to-purple-700 transition-all shadow-lg hover:shadow-xl transform hover:-translate-y-0.5 flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
+              className="w-full bg-gradient-to-r from-blue-500 to-purple-600 text-white py-3 px-4 rounded-xl font-semibold hover:from-blue-600 hover:to-purple-700 transition-all shadow-lg hover:shadow-xl transform hover:-translate-y-0.5 flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
             >
               <Plus className="w-5 h-5 mr-2" />
               New {activeMode === 'rag' ? 'RAG' : 'Chat'}
@@ -953,7 +930,7 @@ const ChatFrontend = () => {
 
           {/* Document Upload (RAG Mode) */}
           {activeMode === 'rag' && (
-            <div className="px-4 pb-4">
+            <div className="px-5 pb-5">
               <input
                 ref={fileInputRef}
                 type="file"
@@ -964,7 +941,7 @@ const ChatFrontend = () => {
               <button
                 onClick={() => fileInputRef.current?.click()}
                 disabled={!activeThread || isLoading}
-                className="w-full bg-gradient-to-r from-green-500 to-emerald-600 text-white py-3 px-4 rounded-lg font-medium hover:from-green-600 hover:to-emerald-700 transition-all shadow-lg hover:shadow-xl transform hover:-translate-y-0.5 flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
+                className="w-full bg-gradient-to-r from-green-500 to-emerald-600 text-white py-3 px-4 rounded-xl font-semibold hover:from-green-600 hover:to-emerald-700 transition-all shadow-lg hover:shadow-xl transform hover:-translate-y-0.5 flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
               >
                 <Upload className="w-5 h-5 mr-2" />
                 Upload Document
@@ -985,22 +962,22 @@ const ChatFrontend = () => {
           )}
 
           {/* Settings */}
-          <div className="px-4 pb-4">
+          <div className="px-5 pb-5">
             <button
               onClick={() => setShowSettings(!showSettings)}
-              className="w-full bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-200 py-2 px-4 rounded-lg font-medium hover:bg-gray-200 dark:hover:bg-gray-700 transition-all flex items-center justify-center"
+              className="w-full bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-200 py-2 px-4 rounded-xl font-semibold hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all flex items-center justify-center"
             >
               <Settings className="w-4 h-4 mr-2" />
               Settings
             </button>
             {showSettings && (
-              <div className="mt-3 p-3 bg-gray-50 dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700 space-y-3">
+              <div className="mt-3 p-3 bg-zinc-50 dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-700 space-y-3">
                 <div>
-                  <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Model</label>
+                  <label className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300 mb-1">Model</label>
                   <select
                     value={selectedModel}
                     onChange={(e) => setSelectedModel(e.target.value)}
-                    className="w-full p-2 border border-gray-300 dark:border-gray-700 rounded-md text-sm bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100"
+                    className="w-full p-2 border border-zinc-300 dark:border-zinc-700 rounded-md text-base bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100"
                   >
                     <option value="llama">Llama 3.1 8B</option>
                     <option value="deepseek">DeepSeek Coder V2</option>
@@ -1011,8 +988,8 @@ const ChatFrontend = () => {
           </div>
 
           {/* Thread List */}
-          <div className="flex-1 overflow-y-auto px-4">
-            <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-200 mb-3">Recent Conversations</h3>
+          <div className="flex-1 overflow-y-auto px-5">
+            <h3 className="text-base font-bold text-zinc-700 dark:text-zinc-200 mb-3">Recent Conversations</h3>
             <div className="space-y-2">
               {threads.map((thread) => (
                 <button
@@ -1021,12 +998,12 @@ const ChatFrontend = () => {
                     setActiveThread(thread.thread_id);
                     loadThreadHistory(thread.thread_id);
                   }}
-                  className={`w-full text-left p-3 rounded-lg transition-all hover:bg-gray-100 dark:hover:bg-gray-800 ${
-                    activeThread === thread.thread_id ? 'bg-blue-50 dark:bg-blue-900 border border-blue-200 dark:border-blue-700' : 'bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-700'
+                  className={`w-full text-left p-3 rounded-xl transition-all hover:bg-zinc-100 dark:hover:bg-zinc-800 ${
+                    activeThread === thread.thread_id ? 'bg-blue-50 dark:bg-blue-900 border border-blue-200 dark:border-blue-700' : 'bg-white dark:bg-zinc-900 border border-zinc-100 dark:border-zinc-700'
                   }`}
                 >
-                  <div className="text-sm font-medium text-gray-800 dark:text-gray-100 truncate">{thread.title}</div>
-                  <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                  <div className="text-base font-semibold text-zinc-800 dark:text-zinc-100 truncate">{thread.title}</div>
+                  <div className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
                     {new Date(thread.created_at || thread.timestamp).toLocaleDateString()}
                   </div>
                 </button>
@@ -1036,15 +1013,15 @@ const ChatFrontend = () => {
         </div>
 
         {/* Main Chat Area */}
-        <div className="flex-1 flex flex-col">
+        <div className="flex-1 flex flex-col bg-gradient-to-br from-white to-zinc-50 dark:from-zinc-950 dark:to-zinc-900">
           {/* Header */}
-          <div className="bg-white dark:bg-gray-900 shadow-sm border-b border-gray-200 dark:border-gray-800 p-4">
+          <div className="bg-white dark:bg-zinc-900 shadow-sm border-b border-zinc-200 dark:border-zinc-800 p-6">
             <div className="flex items-center justify-between">
               <div>
-                <h2 className="text-xl font-semibold text-gray-800 dark:text-gray-100">
+                <h2 className="text-2xl font-bold text-zinc-800 dark:text-zinc-100">
                   {activeMode === 'rag' ? 'Document Q&A' : 'AI Chat'}
                 </h2>
-                <p className="text-sm text-gray-600 dark:text-gray-400">
+                <p className="text-base text-zinc-600 dark:text-zinc-400">
                   {activeMode === 'rag' 
                     ? uploadedDoc 
                       ? `Chatting about: ${uploadedDoc.filename}`
@@ -1053,9 +1030,9 @@ const ChatFrontend = () => {
                   }
                 </p>
               </div>
-              <div className="flex items-center gap-4">
+              <div className="flex items-center gap-5">
                 <DarkModeToggle />
-                <div className="text-sm text-gray-500 dark:text-gray-300 whitespace-nowrap">
+                <div className="text-base text-zinc-500 dark:text-zinc-300 whitespace-nowrap">
                   Model: {selectedModel === 'llama' ? 'Llama 3.1 8B' : 'DeepSeek Coder V2'}
                 </div>
                 <UserCircle />
@@ -1064,70 +1041,76 @@ const ChatFrontend = () => {
           </div>
 
           {/* Messages */}
-          <div className="flex-1 overflow-y-auto p-6 space-y-4 bg-gray-50 dark:bg-gray-950">
-            {messages.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-full text-gray-500 dark:text-gray-400">
-                <div className="w-16 h-16 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full flex items-center justify-center mb-4">
-                  {activeMode === 'rag' ? (
-                    <FileText className="w-8 h-8 text-white" />
-                  ) : (
-                    <MessageCircle className="w-8 h-8 text-white" />
-                  )}
+          <div className="flex-1 overflow-y-auto px-0 py-8 bg-gradient-to-b from-zinc-50 to-white dark:from-zinc-950 dark:to-zinc-900">
+            <div className="max-w-4xl mx-auto px-2">
+              {messages.length === 0 ? (
+                <div className="flex flex-col items-center justify-center h-full text-zinc-500 dark:text-zinc-400 pt-24">
+                  <div className="w-20 h-20 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full flex items-center justify-center mb-6 shadow-lg">
+                    {activeMode === 'rag' ? (
+                      <FileText className="w-10 h-10 text-white" />
+                    ) : (
+                      <MessageCircle className="w-10 h-10 text-white" />
+                    )}
+                  </div>
+                  <h3 className="text-2xl font-bold mb-2">
+                    {activeMode === 'rag' ? 'Start Document Q&A' : 'Start Conversation'}
+                  </h3>
+                  <p className="text-center max-w-lg">
+                    {activeMode === 'rag' 
+                      ? 'Upload a document and ask questions about its content. I\'ll provide answers based on the document.'
+                      : 'Ask me anything! I\'m here to help with questions, coding, writing, and more.'
+                    }
+                  </p>
                 </div>
-                <h3 className="text-xl font-semibold mb-2">
-                  {activeMode === 'rag' ? 'Start Document Q&A' : 'Start Conversation'}
-                </h3>
-                <p className="text-center max-w-md">
-                  {activeMode === 'rag' 
-                    ? 'Upload a document and ask questions about its content. I\'ll provide answers based on the document.'
-                    : 'Ask me anything! I\'m here to help with questions, coding, writing, and more.'
-                  }
-                </p>
-              </div>
-            ) : (
-              messages.map((message, index) => (
-                <MessageBubble key={`${message.timestamp}-${index}`} message={message} />
-              ))
-            )}
-            <div ref={messagesEndRef} />
-          </div>
-
-          {/* Input Area */}
-          <div className="bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-800 p-4">
-            <div className="flex items-end space-x-4 max-w-4xl mx-auto">
-              <div className="flex-1 relative">
-                <textarea
-                  value={inputMessage}
-                  onChange={(e) => setInputMessage(e.target.value)}
-                  onKeyDown={handleKeyDown}
-                  placeholder={
-                    activeMode === 'rag' && !uploadedDoc
-                      ? 'Upload a document first to start asking questions...'
-                      : 'Type your message... (Enter to send, Shift+Enter for new line)'
-                  }
-                  disabled={isLoading || (activeMode === 'rag' && !uploadedDoc)}
-                  className="w-full p-4 pr-12 border border-gray-300 dark:border-gray-700 rounded-2xl resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-50 dark:disabled:bg-gray-800 disabled:text-gray-500 min-h-[56px] max-h-32 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100"
-                  rows={1}
-                  style={{ height: 'auto' }}
-                  onInput={(e) => {
-                    e.target.style.height = 'auto';
-                    e.target.style.height = Math.min(e.target.scrollHeight, 128) + 'px';
-                  }}
-                />
-              </div>
-              <button
-                onClick={sendMessage}
-                disabled={!inputMessage.trim() || isLoading || (activeMode === 'rag' && !uploadedDoc)}
-                className="bg-gradient-to-r from-blue-500 to-purple-600 text-white p-4 rounded-2xl hover:from-blue-600 hover:to-purple-700 transition-all shadow-lg hover:shadow-xl transform hover:-translate-y-0.5 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none disabled:hover:shadow-lg"
-              >
-                {isLoading ? (
-                  <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                ) : (
-                  <Send className="w-5 h-5" />
-                )}
-              </button>
+              ) : (
+                messages.map((message, index) => (
+                  <MessageBubble key={`${message.timestamp}-${index}`} message={message} />
+                ))
+              )}
+              <div ref={messagesEndRef} />
             </div>
           </div>
+
+{/* ✅ Fixed Input Area - Replace your current input section */}
+<div className="p-6">
+  <div className="max-w-3xl mx-auto">
+    <div className="relative flex items-end bg-white dark:bg-zinc-900 rounded-2xl shadow-md border border-zinc-200 dark:border-zinc-800 overflow-hidden">
+      <textarea
+        value={inputMessage}
+        onChange={(e) => {
+          setInputMessage(e.target.value);
+          // Auto-resize
+          e.target.style.height = 'auto';
+          e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px';
+        }}
+        onKeyDown={handleKeyDown}
+        placeholder={
+          activeMode === 'rag' && !uploadedDoc
+            ? 'Upload a document first to start asking questions...'
+            : 'Ask anything...'
+        }
+        disabled={isLoading || (activeMode === 'rag' && !uploadedDoc)}
+        className="bg-transparent resize-none focus:outline-none text-base text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 dark:placeholder-zinc-500 px-4 py-3 min-h-[48px] max-w-full w-full disabled:opacity-50 disabled:cursor-not-allowed"
+        rows={1}
+        style={{ maxHeight: '120px' }}
+      />
+      <div className="p-2">
+        <button
+          onClick={sendMessage}
+          disabled={!inputMessage.trim() || isLoading || (activeMode === 'rag' && !uploadedDoc)}
+          className="bg-gradient-to-r from-blue-500 to-purple-600 text-white p-2 rounded-full shadow-lg hover:from-blue-600 hover:to-purple-700 transition-all duration-200 flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed w-10 h-10"
+        >
+          {isLoading ? (
+            <Loader2 className="w-4 h-4 animate-spin" />
+          ) : (
+            <Send className="w-4 h-4" />
+          )}
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
         </div>
       </div>
     </ErrorBoundary>

@@ -37,7 +37,7 @@ DEFAULT_MODEL = "llama"
 # --- Prompt Template ---
 prompt_template = ChatPromptTemplate.from_messages([
     ("system",'''You are a helpful assistant. conversational in your responses. ask followup questions if needed. 
-     complete the each response within 1200 tokens and ask if the user needs a detailed response.'''),
+     complete the each response within 1200 tokens.'''),
     MessagesPlaceholder(variable_name="chat_history"),
     ("human", "{input}")
 ]).partial(current_time=lambda: datetime.datetime.now().strftime("%A, %B %d, %Y at %I:%M:%S %p IST"))
@@ -53,7 +53,7 @@ class ConversationalAgent:
             openai_api_base=f"{API_GATEWAY_URL}/v1",
             openai_api_key=os.getenv("YOUR_API_KEY", "token-abc123"),
             temperature=0.7,
-            max_tokens=1500,
+            max_tokens=5000,
             streaming=True,
         )
         self.prompt_template = prompt_template

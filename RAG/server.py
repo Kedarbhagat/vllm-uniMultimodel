@@ -624,6 +624,10 @@ def chat_send(payload: MessageInput):
             print(f"TOTAL /chat/send time: {time.time() - t0:.3f} sec")
 
             yield "data: [DONE]\n\n"
+        except GeneratorExit:
+        # Client disconnected — cleanup only, don’t yield
+            print("⚠️ Client disconnected during SSE stream")
+            raise  # <- important, re-raise GeneratorExit
         except Exception as exc:
             print(f"Error in SSE stream: {exc}")
             yield f"data: {json.dumps({'error': str(exc)})}\n\n"
