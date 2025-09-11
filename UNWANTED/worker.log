@@ -1,7 +1,0 @@
-2025-05-06 22:44:32,056 - worker - INFO - Worker starting up...
-2025-05-06 22:44:32,059 - worker - INFO - Connected to Redis at 172.31.21.186:6379
-2025-05-06 22:44:32,093 - worker - WARNING - Backend for ./meta-llama/Llama-3.1-8B-Instruct-awq is not responding
-2025-05-06 22:44:32,093 - worker - WARNING - No healthy backends found! Worker will still run but may not process tasks correctly.
-2025-05-06 22:44:32,094 - worker - INFO - Worker started. 0 tasks in queue.
-2025-05-06 22:51:18,381 - worker - INFO - Shutdown signal received. Finishing current task before exiting...
-2025-05-06 22:51:18,382 - worker - INFO - Worker shutdown complete.

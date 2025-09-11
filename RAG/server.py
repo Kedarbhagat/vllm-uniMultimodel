@@ -30,7 +30,9 @@ from dbhelper import get_connection, get_threads_by_user, get_user_by_email, cre
 
 from prometheus_fastapi_instrumentator import Instrumentator
 
-app = FastAPI(title="Simple Conversational Agent")
+app = FastAPI()
+
+# Enable Prometheus metrics exporter
 Instrumentator().instrument(app).expose(app)
 # -----------Models-----------
 MODEL_REGISTRY = {
@@ -70,10 +72,8 @@ class RagInput(BaseModel):
     model: Optional[str] = "llama"
 
 
-os.environ["LANGCHAIN_TRACING_V2"] = "true" # Enable LangSmith tracing for LangChain/LangGraph
-os.environ["LANGCHAIN_ENDPOINT"] = "https://api.smith.langchain.com"
-os.environ["LANGCHAIN_API_KEY"] = "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" # Replace with your actual key
-os.environ["LANGCHAIN_PROJECT"] = "pr-healthy-nephew-28"
+#os.environ["LANGCHAIN_TRACING_V2"] = "true" # Enable LangSmith tracing for LangChain/LangGraph
+#os.environ["LANGCHAIN_ENDPOINT"] = "https://api.smith.langchain.com"
 
 # ---------- Health Check ----------
 @app.get("/")
@@ -337,7 +337,7 @@ async def context_aware_rag_streaming(data: RagInput):
     llm_setup_start = time.perf_counter()
     os.environ["OPENAI_API_KEY"] = os.getenv("OPENAI_API_KEY", "token-abc123")
     YOUR_API_KEY = os.getenv("YOUR_API_KEY", "token-abc123")
-    API_GATEWAY_URL = "http://172.17.35.82:8082"
+    API_GATEWAY_URL = "http://192.168.190.28:8082"
 
     llm = ChatOpenAI(
         model=model,

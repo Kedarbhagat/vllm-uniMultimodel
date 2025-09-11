@@ -26,7 +26,7 @@ class ChatAPIUser(HttpUser):
             "how will AI change the job market?"
         ]
         
-        self.models = ["llama", "deepseek"]
+        self.models = ["deepseek"]
         
         self.create_test_thread()
         print(f"User initialized with email: {self.user_email}, thread_id: {self.thread_id}")

@@ -1,4 +1,4 @@
-from flask import Flask, redirect, session, jsonify
+from flask import Flask, redirect, session, jsonify, request
 from authlib.integrations.flask_client import OAuth
 from dotenv import load_dotenv
 from flask_sqlalchemy import SQLAlchemy
@@ -6,29 +6,34 @@ from datetime import datetime, timedelta
 import os
 import uuid
 from flask_cors import CORS
+from werkzeug.security import generate_password_hash, check_password_hash
 
 # Load environment variables from .env
 load_dotenv()
 
 app = Flask(__name__)
 
-# --- CORS config - Fixed for localhost development ---
+# --- CORS config ---
 CORS(app,
      supports_credentials=True,
-     origins=["http://localhost:3001", "http://127.0.0.1:3001"])
+     origins=[
+         "http://localhost:3001",
+         "http://127.0.0.1:3001",
+         "http://192.168.190.28:3001"  # <-- Add this line
+     ])
 
-# --- Flask session config - Fixed for localhost ---
-app.secret_key = os.getenv("SESSION_SECRET_KEY", "your-secret-key-here")  # Added fallback
+# --- Flask session config ---
+app.secret_key = os.getenv("SESSION_SECRET_KEY", "your-secret-key-here")
 app.permanent_session_lifetime = timedelta(days=31)
 app.config.update(
-    SESSION_COOKIE_SAMESITE="Lax",  # Changed from "None" for localhost
-    SESSION_COOKIE_SECURE=False,     # Keep False for localhost HTTP
-    SESSION_COOKIE_HTTPONLY=True,    # Added for security
-    SESSION_COOKIE_DOMAIN=None       # Let Flask handle domain for localhost
+    SESSION_COOKIE_SAMESITE="Lax",
+    SESSION_COOKIE_SECURE=False,
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_DOMAIN=None  # For development, keep None
 )
 
 # --- SQLAlchemy config ---
-app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv("DATABASE_URL", "sqlite:///app.db")  # Added fallback
+app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv("DATABASE_URL", "sqlite:///app.db")
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 
@@ -38,10 +43,11 @@ class User(db.Model):
     id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     email = db.Column(db.String(120), unique=True, nullable=False)
     name = db.Column(db.String(120), nullable=False)
+    password_hash = db.Column(db.String(256))  # <-- Add this line
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     auth_provider = db.Column(db.String(50), default="google")
 
-# --- OAuth config - Fixed redirect URI ---
+# --- OAuth config ---
 oauth = OAuth(app)
 google = oauth.register(
     name='google',
@@ -51,23 +57,21 @@ google = oauth.register(
     client_kwargs={"scope": "openid email profile"},
 )
 
-ALLOWED_DOMAIN = os.getenv("ALLOWED_DOMAIN", "gmail.com")  # Added fallback for testing
+ALLOWED_DOMAIN = os.getenv("ALLOWED_DOMAIN", "gmail.com")
 
 # --- Routes ---
 
 @app.route('/')
 def home():
-    # Redirect to React app on correct port
-    return redirect("http://localhost:3001")
+    return redirect("http://192.168.190.28:3001")
 
 @app.route('/login')
 def login():
-    redirect_uri = "http://localhost:9095/callback"
+    redirect_uri = "http://localhost:9095/callback"   # Flask running locally
     return google.authorize_redirect(
         redirect_uri,
-        prompt="select_account"   # <-- Forces Google to always show account chooser
+        prompt="select_account"
     )
-
 
 @app.route('/callback')
 def callback():
@@ -81,10 +85,8 @@ def callback():
     email = userinfo.get('email')
     if not email:
         return "<h3>No email found in Google response</h3><p><a href='/login'>Try again</a></p>", 400
-        
-    domain = email.split('@')[-1]
 
-    # More flexible domain checking for development
+    domain = email.split('@')[-1]
     if ALLOWED_DOMAIN and domain != ALLOWED_DOMAIN:
         session.clear()
         return f"""
@@ -101,7 +103,7 @@ def callback():
         "picture": userinfo.get("picture")
     }
 
-    # Save new user in DB if not exists
+    # Save user in DB
     try:
         existing_user = User.query.filter_by(email=email).first()
         if not existing_user:
@@ -117,10 +119,8 @@ def callback():
             print(f"User already exists: {email}")
     except Exception as e:
         print(f"Database error: {e}")
-        # Continue anyway - session is still valid
 
-    # Redirect to React app
-    return redirect("http://localhost:3001")
+    return redirect("http://localhost:3001")   # React app
 
 @app.route('/api/user/me')
 def get_current_user_api():
@@ -139,15 +139,12 @@ def get_current_user_api():
 @app.route('/logout')
 def logout():
     session.clear()
-    # Redirect back to React app
     return redirect("http://localhost:3001")
 
-# Health check endpoint
 @app.route('/health')
 def health():
     return jsonify({"status": "healthy", "timestamp": datetime.utcnow().isoformat()})
 
-# Debug endpoint (remove in production)
 @app.route('/debug/session')
 def debug_session():
     if app.debug:
@@ -158,6 +155,45 @@ def debug_session():
         })
     return jsonify({"error": "Debug mode disabled"}), 403
 
+# --- Registration endpoint ---
+@app.route('/api/register', methods=['POST'])
+def register():
+    data = request.json
+    email = data.get('email', '').strip().lower()
+    password = data.get('password', '')
+    name = data.get('name', 'User')
+    if not email or not password:
+        return jsonify({'message': 'Email and password required'}), 400
+    if User.query.filter_by(email=email).first():
+        return jsonify({'message': 'Email already registered'}), 409
+    user = User(
+        email=email,
+        name=name,
+        password_hash=generate_password_hash(password),
+        auth_provider='local'
+    )
+    db.session.add(user)
+    db.session.commit()
+    return jsonify({'message': 'Registration successful'}), 201
+
+# --- Login endpoint ---
+@app.route('/api/login', methods=['POST'])
+def login_email():
+    data = request.json
+    email = data.get('email', '').strip().lower()
+    password = data.get('password', '')
+    user = User.query.filter_by(email=email, auth_provider='local').first()
+    if not user or not check_password_hash(user.password_hash, password):
+        return jsonify({'message': 'Invalid credentials'}), 401
+    session.permanent = True
+    session['user'] = {
+        "email": user.email,
+        "name": user.name,
+        "sub": user.id,
+        "picture": None
+    }
+    return jsonify({'message': 'Login successful'})
+
 if __name__ == '__main__':
     with app.app_context():
         try:
@@ -165,9 +201,9 @@ if __name__ == '__main__':
             print("Database tables created successfully")
         except Exception as e:
             print(f"Database initialization error: {e}")
-    
+
     print("Starting Flask app on http://localhost:9095")
     print("CORS enabled for: http://localhost:3001")
     print(f"Allowed domain: {ALLOWED_DOMAIN}")
-    
-    app.run(host="0.0.0.0", port=9095, debug=True)  # Changed to 127.0.0.1 for localhost
+
+    app.run(host="0.0.0.0", port=9095, debug=True)

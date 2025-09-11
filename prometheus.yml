@@ -1,4 +1,15 @@
 scrape_configs:
-  - job_name: 'fastapi'
+  - job_name: 'windows_exporter'
+    scrape_interval: 5s
     static_configs:
-      - targets: ['localhost:8000']  # Change port if needed
+      - targets: ['localhost:9182']  # Windows metrics
+
+  - job_name: 'nvidia_gpu'
+    scrape_interval: 5s
+    static_configs:
+      - targets: ['localhost:9183']  # NVIDIA GPU exporter
+
+  - job_name: 'llama'
+    scrape_interval: 5s
+    static_configs:
+      - targets: ['172.31.21.186:8002']  # LLaMA FastAPI metrics
