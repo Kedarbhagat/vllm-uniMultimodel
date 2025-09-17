@@ -9,7 +9,12 @@ scrape_configs:
     static_configs:
       - targets: ['localhost:9183']  # NVIDIA GPU exporter
 
-  - job_name: 'llama'
+  - job_name: 'DeepSeek'
+    scrape_interval: 5s
+    static_configs:
+      - targets: ['172.31.21.186:8002']  # LLaMA FastAPI metrics
+
+  - job_name: 'LLaMA'
     scrape_interval: 5s
     static_configs:
       - targets: ['172.31.21.186:8002']  # LLaMA FastAPI metrics

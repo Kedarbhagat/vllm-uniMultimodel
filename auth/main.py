@@ -17,9 +17,11 @@ app = Flask(__name__)
 CORS(app,
      supports_credentials=True,
      origins=[
+        "http://192.168.190.28:3001",
+         "http://36.255.14.28:3001",
          "http://localhost:3001",
-         "http://127.0.0.1:3001",
-         "http://192.168.190.28:3001"  # <-- Add this line
+         "http://127.0.0.1:3001"
+        
      ])
 
 # --- Flask session config ---
@@ -63,6 +65,7 @@ ALLOWED_DOMAIN = os.getenv("ALLOWED_DOMAIN", "gmail.com")
 
 @app.route('/')
 def home():
+    #return redirect("http://36.255.14.28:3001")
     return redirect("http://192.168.190.28:3001")
 
 @app.route('/login')
@@ -164,6 +167,9 @@ def register():
     name = data.get('name', 'User')
     if not email or not password:
         return jsonify({'message': 'Email and password required'}), 400
+    # Only allow nmit.ac.in emails
+    if not email.endswith('@nmit.ac.in'):
+        return jsonify({'message': 'Only nmit.ac.in emails are allowed'}), 403
     if User.query.filter_by(email=email).first():
         return jsonify({'message': 'Email already registered'}), 409
     user = User(

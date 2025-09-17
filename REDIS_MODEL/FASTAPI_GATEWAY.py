@@ -64,7 +64,7 @@ class ChatRequest(BaseModel):
     model: str
     messages: List[ChatMessage]
     temperature: Optional[float] = 0.7
-    max_tokens: Optional[int] = 2000
+    #max_tokens: Optional[int] = None
     stream: Optional[bool] = False
 
 class TaskResponse(BaseModel):
@@ -152,7 +152,7 @@ async def create_chat_completion(
             try:
                 # Set a reasonable timeout for the stream to exist initially
                 # The worker needs to create the stream. If it doesn't appear, something is wrong.
-                initial_wait_time = 30 # seconds
+                initial_wait_time = 45 # seconds
                 start_time = time.time()
                 stream_ready = False
                 while time.time() - start_time < initial_wait_time:

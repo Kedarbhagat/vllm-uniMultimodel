@@ -1,14 +1,15 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Send, Upload, FileText, User, Bot, Settings, MessageCircle, Plus, LogOut, Moon, Sun, AlertCircle, Loader2, X, Paperclip } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import remarkGfm from 'remark-gfm';
 import LiquidEther from './LiquidEther';
+import { List } from 'react-window'; // FIX: Use List, not FixedSizeList
 
 // Configuration
-//const AUTH_API_URL = 'http://localhost:9095';
-// filepath: c:\Users\STUDENT\Documents\vllm\RAG\chat-frontend\src\App.js
+//const AUTH_API_URL = 'http://36.255.14.28:9095';
+//const API_BASE_URL = 'http://36.255.14.28:9096';
 const AUTH_API_URL = 'http://192.168.190.28:9095';
 const API_BASE_URL = 'http://192.168.190.28:9096';
 
@@ -103,7 +104,7 @@ const ErrorBoundary = ({ children, fallback }) => {
 };
 
 // Toast notification component
-const Toast = ({ message, type = 'error', onClose }) => {
+const Toast = React.memo(({ message, type = 'error', onClose }) => {
   useEffect(() => {
     const timer = setTimeout(onClose, 5000);
     return () => clearTimeout(timer);
@@ -119,12 +120,11 @@ const Toast = ({ message, type = 'error', onClose }) => {
       </div>
     </div>
   );
-};
+});
 
 const ChatFrontend = () => {
   // Core state
   const [messages, setMessages] = useState([]);
-  const [inputMessage, setInputMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [threads, setThreads] = useState([]);
   const [activeThread, setActiveThread] = useState(null);
@@ -138,8 +138,8 @@ const ChatFrontend = () => {
   // UI state
   const [selectedModel, setSelectedModel] = useState('llama');
   
-  // FIXED: Thread-specific document storage
-  const [threadDocuments, setThreadDocuments] = useState(new Map()); // Map of threadId -> documentInfo
+  // Thread-specific document storage
+  const [threadDocuments, setThreadDocuments] = useState(new Map());
   
   const [showSettings, setShowSettings] = useState(false);
   const [darkMode, setDarkMode] = useState(() => localStorage.getItem('darkMode') === 'true');
@@ -158,8 +158,8 @@ const ChatFrontend = () => {
   const messagesEndRef = useRef(null);
   const fileInputRef = useRef(null);
 
-  // Get current thread's document
-  const getCurrentThreadDocument = useCallback(() => {
+  // PERFORMANCE FIX: Memoize current thread's document
+  const getCurrentThreadDocument = useMemo(() => {
     return activeThread ? threadDocuments.get(activeThread) : null;
   }, [activeThread, threadDocuments]);
 
@@ -178,7 +178,7 @@ const ChatFrontend = () => {
     }
   }, [activeThread]);
 
-  // Utility functions
+  // PERFORMANCE FIX: Memoize utility functions to prevent re-renders
   const showToast = useCallback((message, type = 'error') => {
     setToast({ message, type });
   }, []);
@@ -187,21 +187,27 @@ const ChatFrontend = () => {
     setToast(null);
   }, []);
 
+  // PERFORMANCE FIX: Debounced scroll to bottom to prevent excessive calls
   const scrollToBottom = useCallback(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (messagesEndRef.current) {
+      messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
   }, []);
 
   const addSystemMessage = useCallback((content) => {
     const systemMsg = {
       role: 'system',
       content,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      id: Date.now() + Math.random() // Add unique ID to prevent key issues
     };
     setMessages(prev => [...prev, systemMsg]);
   }, []);
 
   // Authentication effect - runs once on mount
   useEffect(() => {
+    let isMounted = true; // Prevent state updates if component unmounted
+
     const fetchUserInfo = async () => {
       setIsAuthLoading(true);
       setAuthError(null);
@@ -210,6 +216,8 @@ const ChatFrontend = () => {
         const response = await fetch(`${AUTH_API_URL}/api/user/me`, {
           credentials: 'include'
         });
+        
+        if (!isMounted) return;
         
         if (response.ok) {
           const data = await response.json();
@@ -227,18 +235,28 @@ const ChatFrontend = () => {
           setAuthError(`Authentication check failed: ${response.status}`);
         }
       } catch (error) {
-        console.error('Error fetching user info:', error);
-        setAuthError(`Failed to check authentication: ${error.message}`);
+        if (isMounted) {
+          console.error('Error fetching user info:', error);
+          setAuthError(`Failed to check authentication: ${error.message}`);
+        }
       } finally {
-        setIsAuthLoading(false);
+        if (isMounted) {
+          setIsAuthLoading(false);
+        }
       }
     };
     
     fetchUserInfo();
+    
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
   // Initialize user session when userEmail changes
   useEffect(() => {
+    let isMounted = true;
+
     const initializeUserSession = async () => {
       if (!userEmail || userEmail === 'undefined') {
         return;
@@ -248,6 +266,8 @@ const ChatFrontend = () => {
       
       try {
         const userThreads = await loadUserThreads(userEmail);
+        if (!isMounted) return;
+
         setThreads(userThreads);
 
         if (userThreads && userThreads.length > 0) {
@@ -258,31 +278,47 @@ const ChatFrontend = () => {
           const mostRecentThread = sortedThreads[0];
           setActiveThread(mostRecentThread.thread_id);
           await loadThreadHistory(mostRecentThread.thread_id);
-          addSystemMessage(` Welcome back! Loaded your most recent chat: "${mostRecentThread.title}"`);
+          if (isMounted) {
+            addSystemMessage(`Welcome back! Loaded your most recent chat: "${mostRecentThread.title}"`);
+          }
         } else {
           const threadId = await createInitialThread(userEmail);
-          setActiveThread(threadId);
-          setMessages([]);
-          addSystemMessage(` Welcome! Created your first chat session!`);
+          if (isMounted) {
+            setActiveThread(threadId);
+            setMessages([]);
+            addSystemMessage(`Welcome! Created your first chat session!`);
+          }
         }
         
-        // FIXED: Clear thread documents when initializing
-        setThreadDocuments(new Map());
+        // Clear thread documents when initializing
+        if (isMounted) {
+          setThreadDocuments(new Map());
+        }
 
       } catch (error) {
-        console.error('Failed to initialize user session:', error);
-        setInitializationError(error.message);
-        showToast(`Failed to initialize chat: ${error.message}`);
+        if (isMounted) {
+          console.error('Failed to initialize user session:', error);
+          setInitializationError(error.message);
+          showToast(`Failed to initialize chat: ${error.message}`);
+        }
       }
     };
 
     initializeUserSession();
-  }, [userEmail, showToast, addSystemMessage]);
 
-  // Scroll to bottom when messages change
+    return () => {
+      isMounted = false;
+    };
+  }, [userEmail]);
+
+  // PERFORMANCE FIX: Debounced scroll effect
   useEffect(() => {
-    scrollToBottom();
-  }, [messages, scrollToBottom]);
+    const timer = setTimeout(() => {
+      scrollToBottom();
+    }, 100);
+
+    return () => clearTimeout(timer);
+  }, [messages.length]); // Only depend on message count, not entire messages array
 
   // Dark mode effect
   useEffect(() => {
@@ -310,10 +346,11 @@ const ChatFrontend = () => {
       
       let formattedMessages = [];
       if (Array.isArray(data)) {
-        formattedMessages = data.map(msg => ({
+        formattedMessages = data.map((msg, index) => ({
           role: msg.role,
           content: msg.content,
-          timestamp: msg.created_at
+          timestamp: msg.created_at,
+          id: msg.id || `${msg.created_at}-${index}` // Ensure unique IDs
         }));
       }
       
@@ -324,7 +361,7 @@ const ChatFrontend = () => {
     }
   }, [showToast]);
 
-  // FIXED: Create new thread now clears documents properly
+  // Create new thread
   const createNewThread = useCallback(async () => {
     if (!userEmail) {
       showToast('Please log in to create a new chat');
@@ -336,20 +373,17 @@ const ChatFrontend = () => {
       setActiveThread(threadId);
       setMessages([]);
       
-      // FIXED: Don't clear all thread documents, just ensure new thread has no document
-      // The new thread will automatically have no document since it's not in the Map
-      
       const updatedThreads = await loadUserThreads(userEmail);
       setThreads(updatedThreads);
       
-      addSystemMessage(`🆕 New chat session started!`);
+      addSystemMessage(`New chat session started!`);
     } catch (error) {
       console.error('Error creating new thread:', error);
       showToast(`Failed to create new chat: ${error.message}`);
     }
   }, [userEmail, showToast, addSystemMessage]);
 
-  // FIXED: File upload handler now associates document with current thread
+  // File upload handler
   const handleFileUpload = useCallback(async (file) => {
     if (!activeThread) {
       showToast('Please start a conversation first');
@@ -379,7 +413,7 @@ const ChatFrontend = () => {
 
     try {
       setIsUploading(true);
-      addSystemMessage(`📤 Uploading "${file.name}"...`);
+      addSystemMessage(`Uploading "${file.name}"...`);
       
       const response = await fetch(`${API_BASE_URL}/chat/upload_doc`, {
         method: 'POST',
@@ -394,7 +428,6 @@ const ChatFrontend = () => {
       const data = await response.json();
       
       if (data.document_id) {
-        // FIXED: Store document info for current thread specifically
         const documentInfo = {
           id: data.document_id,
           filename: data.filename,
@@ -403,53 +436,51 @@ const ChatFrontend = () => {
         
         setCurrentThreadDocument(documentInfo);
         
-        addSystemMessage(`📄 Document "${data.filename}" uploaded successfully. ${data.chunks} chunks processed. You can now ask questions about this document!`);
+        addSystemMessage(`Document "${data.filename}" uploaded successfully. ${data.chunks} chunks processed. You can now ask questions about this document!`);
         showToast('Document uploaded successfully!', 'success');
       }
     } catch (error) {
       console.error('Error uploading file:', error);
-      addSystemMessage(`❌ Failed to upload document: ${error.message}`);
+      addSystemMessage(`Failed to upload document: ${error.message}`);
       showToast(`Upload failed: ${error.message}`);
     } finally {
       setIsUploading(false);
     }
   }, [activeThread, showToast, addSystemMessage, setCurrentThreadDocument]);
 
-  // FIXED: Send message handler now uses thread-specific document
-  const sendMessage = useCallback(async () => {
-    if (!inputMessage.trim() || !activeThread || isLoading) return;
+  // PERFORMANCE FIX: Optimized send message handler
+  const sendMessage = useCallback(async (messageContent) => {
+    if (!messageContent || !activeThread || isLoading) return;
 
+    const messageId = Date.now() + Math.random();
     const userMessage = {
       role: 'human',
-      content: inputMessage.trim(),
-      timestamp: new Date().toISOString()
+      content: messageContent,
+      timestamp: new Date().toISOString(),
+      id: messageId
     };
 
-    setMessages(prev => [...prev, userMessage]);
-    const currentMessage = inputMessage.trim();
-    setInputMessage('');
     setIsLoading(true);
+    setMessages(prev => [...prev, userMessage]);
 
     try {
       let endpoint, payload;
       
-      // FIXED: Use current thread's document
-      const currentDoc = getCurrentThreadDocument();
+      const currentDoc = getCurrentThreadDocument;
       
-      // Use RAG endpoint if document is uploaded for current thread
       if (currentDoc) {
         endpoint = `${API_BASE_URL}/chat/rag`;
         payload = {
           thread_id: activeThread,
           document_id: currentDoc.id,
-          query: currentMessage,
+          query: messageContent,
           model: selectedModel
         };
       } else {
         endpoint = `${API_BASE_URL}/chat/send`;
         payload = {
           thread_id: activeThread,
-          message: currentMessage,
+          message: messageContent,
           model: selectedModel
         };
       }
@@ -473,14 +504,21 @@ const ChatFrontend = () => {
       const decoder = new TextDecoder();
       let assistantContent = '';
 
+      const assistantMessageId = Date.now() + Math.random() + 1;
       const assistantMessage = {
         role: 'ai',
         content: '',
         timestamp: new Date().toISOString(),
-        streaming: true
+        streaming: true,
+        id: assistantMessageId
       };
 
+      // Add assistant message placeholder
       setMessages(prev => [...prev, assistantMessage]);
+
+      // PERFORMANCE FIX: Batch content updates to reduce re-renders
+      let updateBuffer = '';
+      let lastUpdate = Date.now();
 
       while (true) {
         const { done, value } = await reader.read();
@@ -498,11 +536,18 @@ const ChatFrontend = () => {
               const parsed = JSON.parse(data);
               if (parsed.token) {
                 assistantContent += parsed.token;
-                setMessages(prev => prev.map((msg, idx) => 
-                  idx === prev.length - 1 
-                    ? { ...msg, content: assistantContent }
-                    : msg
-                ));
+                updateBuffer += parsed.token;
+
+                const now = Date.now();
+                if (now - lastUpdate > 50) {
+                  setMessages(prev => prev.map(msg =>
+                    msg.id === assistantMessageId
+                      ? { ...msg, content: assistantContent }
+                      : msg
+                  ));
+                  updateBuffer = '';
+                  lastUpdate = now;
+                }
               } else if (parsed.error) {
                 throw new Error(parsed.error);
               }
@@ -515,22 +560,23 @@ const ChatFrontend = () => {
         }
       }
 
-      setMessages(prev => prev.map((msg, idx) => 
-        idx === prev.length - 1 
-          ? { ...msg, streaming: false }
+      // Final update after streaming ends
+      setMessages(prev => prev.map(msg =>
+        msg.id === assistantMessageId
+          ? { ...msg, content: assistantContent, streaming: false }
           : msg
       ));
 
     } catch (error) {
       console.error('Error sending message:', error);
-      addSystemMessage(`❌ Error: ${error.message}`);
+      addSystemMessage(`Error: ${error.message}`);
       showToast(`Failed to send message: ${error.message}`);
     } finally {
       setIsLoading(false);
     }
-  }, [inputMessage, activeThread, isLoading, getCurrentThreadDocument, selectedModel, showToast, addSystemMessage]);
+  }, [activeThread, isLoading, getCurrentThreadDocument, selectedModel, showToast, addSystemMessage]);
 
-  // Keyboard handler for message input
+  // PERFORMANCE FIX: Optimized keyboard handler
   const handleKeyDown = useCallback((e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -538,15 +584,16 @@ const ChatFrontend = () => {
     }
   }, [sendMessage]);
 
-  // FIXED: Thread switching handler now properly manages thread-specific documents
+  // Thread switching handler
   const handleThreadSwitch = useCallback(async (threadId) => {
+    if (threadId === activeThread) return; // Prevent unnecessary switches
+    
     setActiveThread(threadId);
     await loadThreadHistory(threadId);
-    // Document will automatically be correct for this thread due to getCurrentThreadDocument()
-  }, [loadThreadHistory]);
+  }, [loadThreadHistory, activeThread]);
 
   // Handler for email login/register
-  const handleEmailAuth = async (e) => {
+  const handleEmailAuth = useCallback(async (e) => {
     e.preventDefault();
     setEmailAuthLoading(true);
     const endpoint = isRegister ? `${AUTH_API_URL}/api/register` : `${AUTH_API_URL}/api/login`;
@@ -565,190 +612,88 @@ const ChatFrontend = () => {
       }
     } catch (err) {
       showToast('Network error');
+    } finally {
+      setEmailAuthLoading(false);
     }
-    setEmailAuthLoading(false);
-  };
+  }, [isRegister, email, password, showToast]);
 
-  // Enhanced Streaming Indicator
-  const StreamingDots = () => (
+  // PERFORMANCE FIX: Memoize streaming indicator
+  const StreamingDots = React.memo(() => (
     <span className="inline-flex items-center ml-2">
       <span className="w-2 h-2 bg-blue-400 rounded-full animate-bounce"></span>
       <span className="w-2 h-2 bg-blue-400 rounded-full animate-bounce mx-1" style={{ animationDelay: '0.15s' }}></span>
       <span className="w-2 h-2 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: '0.3s' }}></span>
     </span>
-  );
+  ));
 
-  // Enhanced MessageBubble
+  // 1. Move markdown components outside render cycle for stability
+  const MARKDOWN_COMPONENTS = {
+    code({ node, inline, className, children, ...props }) {
+      const language = /language-(\w+)/.exec(className || "")?.[1];
+      return inline ? (
+        <code className="bg-gray-100 dark:bg-gray-800 rounded px-1 font-mono text-[0.95em]" {...props}>
+          {children}
+        </code>
+      ) : (
+        <SyntaxHighlighter
+          style={oneDark}
+          language={language || 'text'}
+          PreTag="div"
+          customStyle={{
+            borderRadius: "0.75rem",
+            fontSize: "1em",
+            padding: "1.2em",
+            margin: 0,
+            background: "#18181b",
+            border: "1px solid #374151",
+            userSelect: "text",
+          }}
+          codeTagProps={{
+            style: {
+              background: "transparent",
+              userSelect: "text",
+            }
+          }}
+        >
+          {String(children).replace(/\n$/, "")}
+        </SyntaxHighlighter>
+      );
+    },
+    p({ children, ...props }) {
+      return <p className="mb-3 last:mb-0" {...props}>{children}</p>;
+    },
+  };
+
+  // 2. Memoized MessageBubble with strict comparison
   const MessageBubble = React.memo(({ message }) => {
     const isUser = message.role === "human";
     const isSystem = message.role === "system";
     const isAI = message.role === "ai";
 
-    const CodeBlock = ({ children, language }) => {
-      const codeRef = useRef(null);
-      const [copied, setCopied] = useState(false);
-
-      const handleCopy = useCallback(() => {
-        if (codeRef.current) {
-          const textContent = codeRef.current.textContent || codeRef.current.innerText;
-          navigator.clipboard.writeText(textContent);
-          setCopied(true);
-          setTimeout(() => setCopied(false), 1200);
-        }
-      }, []);
-
-      return (
-        <div className="relative group my-4">
-          <button
-            onClick={handleCopy}
-            className="absolute top-2 right-2 z-10 bg-white/90 dark:bg-gray-800/90 hover:bg-blue-100 dark:hover:bg-blue-900 text-xs px-2 py-1 rounded border border-gray-200 dark:border-gray-700 shadow transition-all opacity-0 group-hover:opacity-100 focus:opacity-100"
-            title="Copy code"
-          >
-            {copied ? "Copied!" : "Copy"}
-          </button>
-          <div ref={codeRef}>
-            <SyntaxHighlighter
-              style={oneDark}
-              language={language || 'text'}
-              PreTag="div"
-              customStyle={{
-                borderRadius: "0.75rem",
-                fontSize: "1em",
-                padding: "1.2em",
-                margin: 0,
-                background: "#18181b",
-                border: "1px solid #374151",
-                userSelect: "text",
-              }}
-              codeTagProps={{
-                style: {
-                  background: "transparent",
-                  userSelect: "text",
-                }
-              }}
-            >
-              {String(children).replace(/\n$/, "")}
-            </SyntaxHighlighter>
-          </div>
-        </div>
-      );
-    };
-
-    const renderAIMarkdown = (content) => (
+    const renderContent = useMemo(() => (
       <div style={{ userSelect: "text" }}>
         <ReactMarkdown
           remarkPlugins={[remarkGfm]}
-          components={{
-            code({ node, inline, className, children, ...props }) {
-              const language = /language-(\w+)/.exec(className || "")?.[1];
-              return inline ? (
-                <code
-                  className="bg-gray-100 dark:bg-gray-800 rounded px-1 font-mono text-[0.95em] text-pink-700 dark:text-pink-300"
-                  style={{ userSelect: "text", background: "rgb(243 244 246)" }}
-                  {...props}
-                >
-                  {children}
-                </code>
-              ) : (
-                <CodeBlock language={language}>{children}</CodeBlock>
-              );
-            },
-            p({ children, ...props }) {
-              return (
-                <p 
-                  className="mb-3 last:mb-0" 
-                  style={{ userSelect: "text", background: "transparent" }}
-                  {...props}
-                >
-                  {children}
-                </p>
-              );
-            },
-          }}
+          components={MARKDOWN_COMPONENTS}
         >
-          {content}
+          {message.content}
         </ReactMarkdown>
       </div>
-    );
-
-    const renderUserMarkdown = (content) => (
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        components={{
-          code({ node, inline, className, children, ...props }) {
-            return inline ? (
-              <code
-                className="bg-blue-400/20 rounded px-1 font-mono text-[0.95em] text-blue-100"
-                style={{ userSelect: "text" }}
-                {...props}
-              >
-                {children}
-              </code>
-            ) : (
-              <div className="my-3 bg-blue-600/20 rounded-lg p-3 border border-blue-400/30">
-                <code 
-                  className="text-blue-100 font-mono text-sm whitespace-pre-wrap block"
-                  style={{ userSelect: "text", background: "transparent" }}
-                >
-                  {children}
-                </code>
-              </div>
-            );
-          },
-        }}
-      >
-        {content}
-      </ReactMarkdown>
-    );
-
-    const renderSystemMarkdown = (content) => (
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        components={{
-          code({ node, inline, className, children, ...props }) {
-            return inline ? (
-              <code
-                className="bg-orange-200 dark:bg-orange-800 rounded px-1 font-mono text-[0.95em] text-orange-800 dark:text-orange-200"
-                style={{ userSelect: "text" }}
-                {...props}
-              >
-                {children}
-              </code>
-            ) : (
-              <div className="my-3 bg-orange-200 dark:bg-orange-800 rounded-lg p-3 border border-orange-300 dark:border-orange-700">
-                <code 
-                  className="text-orange-800 dark:text-orange-200 font-mono text-sm whitespace-pre-wrap block"
-                  style={{ userSelect: "text", background: "transparent" }}
-                >
-                  {children}
-                </code>
-              </div>
-            );
-          },
-        }}
-      >
-        {content}
-      </ReactMarkdown>
-    );
+    ), [message.content]);
 
     if (isAI) {
       return (
         <div className="flex w-full mb-4 justify-start">
           <div className="max-w-3xl w-full">
-            <div
-              className="text-base text-gray-900 dark:text-gray-100 transition-all"
-              style={{
-                background: "transparent",
-                lineHeight: "2",
-                letterSpacing: "0.01em",
-                boxShadow: "none",
-                border: "none",
-                borderRadius: 0,
-                padding: 0,
-              }}
-            >
-              {renderAIMarkdown(message.content)}
-              {message.streaming && <StreamingDots />}
+            <div className="text-base text-gray-900 dark:text-gray-100 transition-all">
+              {renderContent}
+              {message.streaming && (
+                <span className="inline-flex items-center ml-2">
+                  <span className="w-2 h-2 bg-blue-400 rounded-full animate-bounce"></span>
+                  <span className="w-2 h-2 bg-blue-400 rounded-full animate-bounce mx-1" style={{ animationDelay: '0.15s' }}></span>
+                  <span className="w-2 h-2 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: '0.3s' }}></span>
+                </span>
+              )}
             </div>
             <div className="text-xs mt-2 text-gray-400 dark:text-gray-500 pl-2">
               {message.timestamp && new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
@@ -763,7 +708,7 @@ const ChatFrontend = () => {
         <div className="flex w-full mb-4 justify-end">
           <div className="max-w-3xl w-full flex justify-end">
             <div className="bg-gray-200 dark:bg-zinc-800 text-black dark:text-white rounded-3xl px-7 py-5 shadow-md text-base transition-all">
-              {renderUserMarkdown(message.content)}
+              {renderContent}
             </div>
           </div>
         </div>
@@ -772,18 +717,131 @@ const ChatFrontend = () => {
 
     return (
       <div className="flex w-full mb-4 justify-center">
-        <div
-          className="message-bubble bg-gray-200/60 dark:bg-zinc-800/60 text-gray-800 dark:text-gray-100 border border-gray-300 dark:border-zinc-700 rounded-2xl px-6 py-3 text-sm shadow"
-          style={{ backdropFilter: 'blur(2px)' }}
+        <div className="message-bubble bg-gray-200/60 dark:bg-zinc-800/60 text-gray-800 dark:text-gray-100 border border-gray-300 dark:border-zinc-700 rounded-2xl px-6 py-3 text-sm shadow"
+          style={{ backdropFilter: 'blur(2px)' }}>
+          {renderContent}
+        </div>
+      </div>
+    );
+  }, (prevProps, nextProps) =>
+    prevProps.message.id === nextProps.message.id &&
+    prevProps.message.content === nextProps.message.content &&
+    prevProps.message.streaming === nextProps.message.streaming &&
+    prevProps.message.timestamp === nextProps.message.timestamp
+  );
+
+  // 3. Memoized MessageList, virtualized if > 50 messages
+  const MessageList = React.memo(({ messages, messagesEndRef }) => {
+    const Row = useCallback(({ index, style }) => (
+      <div style={style}>
+        <MessageBubble message={messages[index]} />
+      </div>
+    ), [messages]);
+
+    if (messages.length > 50) {
+      return (
+        <List
+          height={600}
+          itemCount={messages.length}
+          itemSize={120}
+          width="100%"
         >
-          {renderSystemMarkdown(message.content)}
+          {Row}
+        </List>
+      );
+    }
+
+    return (
+      <div className="max-w-4xl mx-auto px-2">
+        {messages.map((message) => (
+          <MessageBubble key={message.id} message={message} />
+        ))}
+        <div ref={messagesEndRef} />
+      </div>
+    );
+  }, (prevProps, nextProps) => prevProps.messages === nextProps.messages);
+
+  // 4. Memoized ChatInput with isolated state
+  const ChatInput = React.memo(({ onSendMessage, isLoading, onFileUpload, isUploading, activeThread }) => {
+    const [inputValue, setInputValue] = useState('');
+    const fileInputRef = useRef(null);
+
+    const handleInputChange = useCallback((e) => {
+      setInputValue(e.target.value);
+      e.target.style.height = 'auto';
+      e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px';
+    }, []);
+
+    const handleSend = useCallback(() => {
+      if (inputValue.trim() && !isLoading) {
+        onSendMessage(inputValue.trim());
+        setInputValue('');
+      }
+    }, [inputValue, isLoading, onSendMessage]);
+
+    const handleKeyDown = useCallback((e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        handleSend();
+      }
+    }, [handleSend]);
+
+    return (
+      <div className="p-6">
+        <div className="max-w-3xl mx-auto">
+          <div className="relative flex items-end bg-white dark:bg-zinc-900 rounded-2xl shadow-md border border-zinc-200 dark:border-zinc-800 overflow-hidden">
+            <div className="p-2">
+              <input
+                ref={fileInputRef}
+                type="file"
+                onChange={(e) => e.target.files[0] && onFileUpload(e.target.files[0])}
+                className="hidden"
+                accept=".pdf,.txt,.doc,.docx"
+              />
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                disabled={!activeThread || isUploading}
+                className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-zinc-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                title="Upload document (PDF, TXT, DOC, DOCX)"
+              >
+                {isUploading ? (
+                  <Loader2 className="w-5 h-5 animate-spin text-gray-500" />
+                ) : (
+                  <Paperclip className="w-5 h-5 text-gray-500 dark:text-gray-400" />
+                )}
+              </button>
+            </div>
+            <textarea
+              value={inputValue}
+              onChange={handleInputChange}
+              onKeyDown={handleKeyDown}
+              placeholder="Ask anything..."
+              disabled={isLoading}
+              className="bg-transparent resize-none focus:outline-none text-base text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 dark:placeholder-zinc-500 py-3 min-h-[48px] max-w-full w-full disabled:opacity-50 disabled:cursor-not-allowed"
+              rows={1}
+              style={{ maxHeight: '120px' }}
+            />
+            <div className="p-2">
+              <button
+                onClick={handleSend}
+                disabled={!inputValue.trim() || isLoading}
+                className="bg-gradient-to-r from-blue-500 to-purple-600 text-white p-2 rounded-full shadow-lg hover:from-blue-600 hover:to-purple-700 transition-all duration-200 flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed w-10 h-10"
+              >
+                {isLoading ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Send className="w-4 h-4" />
+                )}
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     );
   });
 
-  // User circle component
-  const UserCircle = () => {
+  // PERFORMANCE FIX: Memoize user circle component
+  const UserCircle = React.memo(() => {
     const [showLogout, setShowLogout] = useState(false);
 
     useEffect(() => {
@@ -829,10 +887,10 @@ const ChatFrontend = () => {
         )}
       </div>
     );
-  };
+  });
 
-  // Dark mode toggle
-  const DarkModeToggle = () => (
+  // PERFORMANCE FIX: Memoize dark mode toggle
+  const DarkModeToggle = React.memo(() => (
     <button
       onClick={() => setDarkMode(v => !v)}
       className="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700 transition"
@@ -840,10 +898,7 @@ const ChatFrontend = () => {
     >
       {darkMode ? <Sun className="w-5 h-5 text-yellow-400" /> : <Moon className="w-5 h-5 text-gray-700" />}
     </button>
-  );
-
-  // Get current thread's uploaded document for display
-  const currentThreadDoc = getCurrentThreadDocument();
+  ));
 
   // Loading screen
   if (isAuthLoading) {
@@ -856,138 +911,131 @@ const ChatFrontend = () => {
   }
 
   // Login screen
-  if (!userEmail) 
-  {
+  if (!userEmail) {
+    return (
+      <div className="relative w-screen h-screen overflow-hidden">
+        {/* LiquidEther animated background */}
+        <div className="absolute inset-0 w-full h-full" style={{ zIndex: 1, background: "#060010" }}>
+          <LiquidEther
+            colors={['#5227ff', '#9eefff', '#b19eef']}
+            mouseForce={20}
+            cursorSize={100}
+            isViscous={false}
+            viscous={30}
+            iterationsViscous={32}
+            iterationsPoisson={32}
+            resolution={0.5}
+            isBounce={false}
+            autoDemo={false}
+            autoSpeed={0.5}
+            autoIntensity={2.2}
+            takeoverDuration={0.25}
+            autoResumeDelay={3000}
+            autoRampDuration={0.6}
+          />
+        </div>
 
-  return (
-    <div className="relative w-screen h-screen overflow-hidden">
-      {/* LiquidEther animated background - positioned absolutely behind everything */}
-      <div className="absolute inset-0 w-full h-full" style={{ zIndex: 1  , background: "#060010" }}>
-        <LiquidEther
-          colors={[  '#5227ff'  , '#9eefff', '#b19eef']}
-          mouseForce={20}
-          cursorSize={100}
-          isViscous={false}
-          viscous={30}
-          iterationsViscous={32}
-          iterationsPoisson={32}
-          resolution={0.5}
-          isBounce={false}
-          autoDemo={false}
-          autoSpeed={0.5}
-          autoIntensity={2.2}
-          takeoverDuration={0.25}
-          autoResumeDelay={3000}
-          autoRampDuration={0.6}
-        />
-      </div>
-
-      {/* Login content overlay - positioned above the animation */}
-      <div 
-        className="absolute inset-0 flex flex-col items-center justify-center"
-        style={{ zIndex: 10, pointerEvents: 'none' }} // Allow mouse to pass through to animation
-      >
-        <div
-          className="bg-white/10 backdrop-blur-xl shadow-2xl flex flex-col items-center max-w-md w-full mx-4"
-          style={{
-            height:'1000',
-            width:'1000',
-            borderRadius: '1.5rem',
-            border: '0px solid rgba(255, 255, 255, 0.2)',
-            boxShadow: '0 15px 30px 0 rgba(6, 12, 70, 0.37)',
-            padding: '2rem',
-            pointerEvents: 'all', // Re-enable pointer events for the login form
-          }}
+        {/* Login content overlay */}
+        <div 
+          className="absolute inset-0 flex flex-col items-center justify-center"
+          style={{ zIndex: 10, pointerEvents: 'none' }}
         >
-          <img src="/nmit-logoo.png" alt="NMIT Logo" className="w-100 h-100 mb-4" />
-         {/* <h3 className="text-2xl font-bold mb-2 text-white">Sign in to LLMNet</h3>/*/}
-          <p className="mb-6 text-white/80 text-center">Welcome to LLMNet</p>
-          
-          {authError && (
-            <div className="mb-4 p-3 bg-red-500/20 border border-red-400/30 rounded-lg text-red-200 text-sm backdrop-blur-sm">
-              <AlertCircle className="w-4 h-4 inline mr-2" />
-              {authError}
-            </div>
-          )}
+          <div
+            className="bg-white/10 backdrop-blur-xl shadow-2xl flex flex-col items-center max-w-md w-full mx-4"
+            style={{
+              height: '500px',
+              width: '400px',
+              borderRadius: '1.5rem',
+              border: '1px solid rgba(255, 255, 255, 0.2)',
+              boxShadow: '0 15px 30px 0 rgba(6, 12, 70, 0.37)',
+              padding: '2rem',
+              pointerEvents: 'all',
+            }}
+          >
+            <img src="/nmit-logoo.png" alt="NMIT Logo" className="w-100 h-100 mb-4" />
+            <p className="mb-6 text-white/80 text-center">Welcome to LLMNet</p>
+            
+            {authError && (
+              <div className="mb-4 p-3 bg-red-500/20 border border-red-400/30 rounded-lg text-red-200 text-sm backdrop-blur-sm">
+                <AlertCircle className="w-4 h-4 inline mr-2" />
+                {authError}
+              </div>
+            )}
 
-          {!showEmailLogin ? (
-            <>
-              <a
-                href={`${AUTH_API_URL}/login`}
-                className="bg-blue-600/90 hover:bg-blue-700/90 text-white px-6 py-3 rounded-lg font-medium flex items-center transition-colors mb-4 backdrop-blur-sm"
-              >
-                <svg className="w-5 h-5 mr-2" viewBox="0 0 24 24">
-                  <path fill="currentColor" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
-                  <path fill="currentColor" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
-                  <path fill="currentColor" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
-                  <path fill="currentColor" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
-                </svg>
-                Sign in with Google
-              </a>
-              <button
-                className="text-white/80 hover:text-white underline text-sm transition-colors"
-                onClick={() => setShowEmailLogin(true)}
-              >
-                Or sign in with Email
-              </button>
-               <p className="mt-6 text-xs text-white/60 text-center">
-                 Department of ISE, NMIT
-              </p>
-
-           
-            </>
-
-          
-          ) : (
-            <form className="w-full" onSubmit={handleEmailAuth}>
-              <input
-                type="email"
-                className="w-full mb-2 px-4 py-2 border border-white/20 rounded-lg bg-white/10 backdrop-blur-sm text-white placeholder-white/60"
-                placeholder="Email"
-                value={email}
-                onChange={e => setEmail(e.target.value)}
-                required
-              />
-              <input
-                type="password"
-                className="w-full mb-2 px-4 py-2 border border-white/20 rounded-lg bg-white/10 backdrop-blur-sm text-white placeholder-white/60"
-                placeholder="Password"
-                value={password}
-                onChange={e => setPassword(e.target.value)}
-                required
-              />
-              <button
-                type="submit"
-                className="w-full bg-blue-600/90 hover:bg-blue-700/90 text-white px-4 py-2 rounded-lg font-medium mb-2 backdrop-blur-sm transition-colors"
-                disabled={emailAuthLoading}
-              >
-                {emailAuthLoading ? (
-                  <Loader2 className="w-4 h-4 animate-spin mx-auto" />
-                ) : (
-                  isRegister ? 'Register' : 'Login'
-                )}
-              </button>
-              <button
-                type="button"
-                className="w-full text-sm text-white/80 hover:text-white underline transition-colors"
-                onClick={() => setIsRegister(r => !r)}
-              >
-                {isRegister ? 'Already have an account? Login' : "Don't have an account? Register"}
-              </button>
-              <button
-                type="button"
-                className="w-full text-xs text-white/60 hover:text-white/80 mt-2 transition-colors"
-                onClick={() => setShowEmailLogin(false)}
-              >
-                Back to Google Login
-              </button>
-            </form>
-          )}
+            {!showEmailLogin ? (
+              <>
+                <a
+                  href={`${AUTH_API_URL}/login`}
+                  className="bg-blue-600/90 hover:bg-blue-700/90 text-white px-6 py-3 rounded-lg font-medium flex items-center transition-colors mb-4 backdrop-blur-sm"
+                >
+                  <svg className="w-5 h-5 mr-2" viewBox="0 0 24 24">
+                    <path fill="currentColor" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                    <path fill="currentColor" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                    <path fill="currentColor" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+                    <path fill="currentColor" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+                  </svg>
+                  Sign in with Google
+                </a>
+                <button
+                  className="text-white/80 hover:text-white underline text-sm transition-colors"
+                  onClick={() => setShowEmailLogin(true)}
+                >
+                  Or sign in with Email
+                </button>
+                <p className="mt-6 text-xs text-white/60 text-center">
+                  Department of ISE, NMIT
+                </p>
+              </>
+            ) : (
+              <form className="w-full" onSubmit={handleEmailAuth}>
+                <input
+                  type="email"
+                  className="w-full mb-2 px-4 py-2 border border-white/20 rounded-lg bg-white/10 backdrop-blur-sm text-white placeholder-white/60"
+                  placeholder="Email"
+                  value={email}
+                  onChange={e => setEmail(e.target.value)}
+                  required
+                />
+                <input
+                  type="password"
+                  className="w-full mb-2 px-4 py-2 border border-white/20 rounded-lg bg-white/10 backdrop-blur-sm text-white placeholder-white/60"
+                  placeholder="Password"
+                  value={password}
+                  onChange={e => setPassword(e.target.value)}
+                  required
+                />
+                <button
+                  type="submit"
+                  className="w-full bg-blue-600/90 hover:bg-blue-700/90 text-white px-4 py-2 rounded-lg font-medium mb-2 backdrop-blur-sm transition-colors"
+                  disabled={emailAuthLoading}
+                >
+                  {emailAuthLoading ? (
+                    <Loader2 className="w-4 h-4 animate-spin mx-auto" />
+                  ) : (
+                    isRegister ? 'Register' : 'Login'
+                  )}
+                </button>
+                <button
+                  type="button"
+                  className="w-full text-sm text-white/80 hover:text-white underline transition-colors"
+                  onClick={() => setIsRegister(r => !r)}
+                >
+                  {isRegister ? 'Already have an account? Login' : "Don't have an account? Register"}
+                </button>
+                <button
+                  type="button"
+                  className="w-full text-xs text-white/60 hover:text-white/80 mt-2 transition-colors"
+                  onClick={() => setShowEmailLogin(false)}
+                >
+                  Back to Google Login
+                </button>
+              </form>
+            )}
+          </div>
         </div>
       </div>
-    </div>
-  );
-}
+    );
+  }
 
   // Error screen for initialization issues
   if (initializationError) {
@@ -1024,12 +1072,9 @@ const ChatFrontend = () => {
         {/* Sidebar */}
         <div className="w-80 bg-white dark:bg-zinc-900 shadow-2xl border-r border-zinc-200 dark:border-zinc-800 flex flex-col">
           <div className="p-7 border-b border-zinc-200 dark:border-zinc-800 flex items-center">
-            {/* Add logo to top left */}
             <h1
               className={`text-3xl font-extrabold tracking-tight ${
-                darkMode
-                  ? "text-white"
-                  : "text-black"
+                darkMode ? "text-white" : "text-black"
               }`}
             >
               LLMNet
@@ -1053,14 +1098,14 @@ const ChatFrontend = () => {
             </button>
           </div>
 
-          {/* Document Status (if uploaded for current thread) */}
-          {currentThreadDoc && (
+          {/* Document Status */}
+          {getCurrentThreadDocument && (
             <div className="mx-5 mb-5">
               <div className="bg-green-50 dark:bg-green-900 rounded-lg border border-green-200 dark:border-green-700 p-3">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center text-green-800 dark:text-green-200">
                     <FileText className="w-4 h-4 mr-2" />
-                    <span className="text-sm font-medium truncate">{currentThreadDoc.filename}</span>
+                    <span className="text-sm font-medium truncate">{getCurrentThreadDocument.filename}</span>
                   </div>
                   <button
                     onClick={() => setCurrentThreadDocument(null)}
@@ -1071,7 +1116,7 @@ const ChatFrontend = () => {
                   </button>
                 </div>
                 <div className="text-xs text-green-600 dark:text-green-300 mt-1">
-                  {currentThreadDoc.chunks} chunks processed
+                  {getCurrentThreadDocument.chunks} chunks processed
                 </div>
               </div>
             </div>
@@ -1112,17 +1157,16 @@ const ChatFrontend = () => {
                   key={thread.thread_id}
                   onClick={() => handleThreadSwitch(thread.thread_id)}
                   className={`w-full text-left p-3 rounded-xl transition-all
-  ${activeThread === thread.thread_id
-    ? 'bg-gray-100 dark:bg-zinc-800 border border-gray-300 dark:border-zinc-700'
-    : 'bg-white dark:bg-zinc-900 border border-zinc-100 dark:border-zinc-700'
-  }
-  hover:bg-gray-100 dark:hover:bg-zinc-800`}
+                    ${activeThread === thread.thread_id
+                      ? 'bg-gray-100 dark:bg-zinc-800 border border-gray-300 dark:border-zinc-700'
+                      : 'bg-white dark:bg-zinc-900 border border-zinc-100 dark:border-zinc-700'
+                    }
+                    hover:bg-gray-100 dark:hover:bg-zinc-800`}
                 >
                   <div className="text-base font-semibold text-zinc-800 dark:text-zinc-100 truncate">{thread.title}</div>
                   <div className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
                     {new Date(thread.created_at || thread.timestamp).toLocaleDateString()}
                   </div>
-                  {/* Show document indicator if thread has a document */}
                   {threadDocuments.get(thread.thread_id) && (
                     <div className="flex items-center mt-1">
                       <FileText className="w-3 h-3 text-green-600 dark:text-green-400 mr-1" />
@@ -1147,8 +1191,8 @@ const ChatFrontend = () => {
                   AI Chat
                 </h2>
                 <p className="text-base text-zinc-600 dark:text-zinc-400">
-                  {currentThreadDoc 
-                    ? `Chatting about: ${currentThreadDoc.filename}`
+                  {getCurrentThreadDocument 
+                    ? `Chatting about: ${getCurrentThreadDocument.filename}`
                     : 'General conversation with AI'
                   }
                 </p>
@@ -1165,90 +1209,17 @@ const ChatFrontend = () => {
 
           {/* Messages */}
           <div className="flex-1 overflow-y-auto px-0 py-8 bg-gradient-to-b from-zinc-50 to-white dark:from-zinc-950 dark:to-zinc-900">
-            <div className="max-w-4xl mx-auto px-2">
-              {messages.length === 0 ? (
-                <div className="flex flex-col items-center justify-center h-full text-zinc-500 dark:text-zinc-400 pt-24">
-                  <div className="w-20 h-20 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full flex items-center justify-center mb-6 shadow-lg">
-                    <MessageCircle className="w-10 h-10 text-white" />
-                  </div>
-                  <h3 className="text-2xl font-bold mb-2">Start Conversation</h3>
-                  <p className="text-center max-w-lg mb-4">
-                    Ask me anything! I can help with questions, coding, writing, and more.
-                  </p>
-                  <p className="text-sm text-zinc-400 dark:text-zinc-500">
-                    Tip: Use the paperclip icon to upload documents for document-based Q&A
-                  </p>
-                </div>
-              ) : (
-                messages.map((message, index) => (
-                  <MessageBubble key={`${message.timestamp}-${index}`} message={message} />
-                ))
-              )}
-              <div ref={messagesEndRef} />
-            </div>
+            <MessageList messages={messages} messagesEndRef={messagesEndRef} />
           </div>
 
-          {/* Input Area with File Upload */}
-          <div className="p-6">
-            <div className="max-w-3xl mx-auto">
-              <div className="relative flex items-end bg-white dark:bg-zinc-900 rounded-2xl shadow-md border border-zinc-200 dark:border-zinc-800 overflow-hidden">
-                {/* File Upload Button */}
-                <div className="p-2">
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    onChange={(e) => e.target.files[0] && handleFileUpload(e.target.files[0])}
-                    className="hidden"
-                    accept=".pdf,.txt,.doc,.docx"
-                  />
-                  <button
-                    onClick={() => fileInputRef.current?.click()}
-                    disabled={!activeThread || isUploading}
-                    className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-zinc-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                    title="Upload document (PDF, TXT, DOC, DOCX)"
-                  >
-                    {isUploading ? (
-                      <Loader2 className="w-5 h-5 animate-spin text-gray-500" />
-                    ) : (
-                      <Paperclip className="w-5 h-5 text-gray-500 dark:text-gray-400" />
-                    )}
-                  </button>
-                </div>
-
-                {/* Text Input */}
-                <textarea
-                  value={inputMessage}
-                  onChange={(e) => {
-                    setInputMessage(e.target.value);
-                    // Auto-resize
-                    e.target.style.height = 'auto';
-                    e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px';
-                  }}
-                  onKeyDown={handleKeyDown}
-                  placeholder="Ask anything..."
-                  disabled={isLoading}
-                  className="bg-transparent resize-none focus:outline-none text-base text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 dark:placeholder-zinc-500 py-3 min-h-[48px] max-w-full w-full disabled:opacity-50 disabled:cursor-not-allowed"
-                  rows={1}
-                  style={{ maxHeight: '120px' }}
-                />
-
-                {/* Send Button */}
-                <div className="p-2">
-                  <button
-                    onClick={sendMessage}
-                    disabled={!inputMessage.trim() || isLoading}
-                    className="bg-gradient-to-r from-blue-500 to-purple-600 text-white p-2 rounded-full shadow-lg hover:from-blue-600 hover:to-purple-700 transition-all duration-200 flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed w-10 h-10"
-                  >
-                    {isLoading ? (
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                    ) : (
-                      <Send className="w-4 h-4" />
-                    )}
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
+          {/* Input Area */}
+          <ChatInput
+            onSendMessage={sendMessage}
+            isLoading={isLoading}
+            onFileUpload={handleFileUpload}
+            isUploading={isUploading}
+            activeThread={activeThread}
+          />
         </div>
       </div>
     </ErrorBoundary>

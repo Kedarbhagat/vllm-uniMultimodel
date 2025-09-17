@@ -1,7 +1,7 @@
 import json
 import datetime
 import time
-from typing import Optional
+from typing import Optional, List
 from fastapi import Form, UploadFile, File, HTTPException, logger
 from pathlib import Path 
 import os, uuid
@@ -55,7 +55,12 @@ class MessageInput(BaseModel):
     thread_id: str
     message: str
     model: Optional[str] = "llama"
-
+    temperature: Optional[float] = 0.7
+    max_tokens: Optional[int] = 2048
+    top_p: Optional[float] = 0.95
+    top_k: Optional[int] = 40
+    system_prompt: Optional[str] = ""
+    # Add more as needed
 
 class CreateThreadInput(BaseModel):
     email: str
@@ -70,6 +75,11 @@ class RagInput(BaseModel):
     document_id: str
     query: str
     model: Optional[str] = "llama"
+    temperature: Optional[float] = 0.7
+    max_tokens: Optional[int] = 2048
+    top_p: Optional[float] = 0.95
+    top_k: Optional[int] = 40
+    system_prompt: Optional[str] = ""
 
 
 #os.environ["LANGCHAIN_TRACING_V2"] = "true" # Enable LangSmith tracing for LangChain/LangGraph
@@ -277,6 +287,11 @@ async def context_aware_rag_streaming(data: RagInput):
     document_id = data.document_id
     query = data.query
     model = data.model or "llama"
+    temperature = data.temperature or 0.7
+    max_tokens = data.max_tokens or 2048
+    top_p = data.top_p or 0.95
+    top_k = data.top_k or 40
+    system_prompt = data.system_prompt or ""
 
     if(model=="llama"):
         model = MODEL_REGISTRY["llama"]
@@ -343,9 +358,12 @@ async def context_aware_rag_streaming(data: RagInput):
         model=model,
         openai_api_base=f"{API_GATEWAY_URL}/v1",
         openai_api_key=YOUR_API_KEY,
-        temperature=0.7,
-        max_tokens=2048,
+        temperature=temperature,
+        max_tokens=max_tokens,
+        top_p=top_p,
+        top_k=top_k,
         streaming=True,
+        system_prompt=system_prompt if system_prompt else None,
     )
     print(f"  → LLM configured in {(time.perf_counter() - llm_setup_start)*1000:.2f}ms")
 
@@ -575,6 +593,11 @@ def chat_send(payload: MessageInput):
     thread_id = payload.thread_id
     question = payload.message
     selected_model = payload.model or "llama"
+    temperature = payload.temperature or 0.7
+    max_tokens = payload.max_tokens or 2048
+    top_p = payload.top_p or 0.95
+    top_k = payload.top_k or 40
+    system_prompt = payload.system_prompt or ""
 
     # 1. Add human message to DB
     t1 = time.time()
