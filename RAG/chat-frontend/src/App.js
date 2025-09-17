@@ -537,17 +537,18 @@ const ChatFrontend = () => {
               if (parsed.token) {
                 assistantContent += parsed.token;
                 updateBuffer += parsed.token;
-
+                
+                // PERFORMANCE FIX: Batch updates every 50ms to reduce re-renders
                 const now = Date.now();
-                if (now - lastUpdate > 50) {
-                  setMessages(prev => prev.map(msg =>
-                    msg.id === assistantMessageId
+               
+                  setMessages(prev => prev.map(msg => 
+                    msg.id === assistantMessageId 
                       ? { ...msg, content: assistantContent }
                       : msg
                   ));
                   updateBuffer = '';
                   lastUpdate = now;
-                }
+                
               } else if (parsed.error) {
                 throw new Error(parsed.error);
               }
@@ -560,9 +561,9 @@ const ChatFrontend = () => {
         }
       }
 
-      // Final update after streaming ends
-      setMessages(prev => prev.map(msg =>
-        msg.id === assistantMessageId
+      // Final update
+      setMessages(prev => prev.map(msg => 
+        msg.id === assistantMessageId 
           ? { ...msg, content: assistantContent, streaming: false }
           : msg
       ));

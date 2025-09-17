@@ -5,6 +5,8 @@
     "tailwindcss": "^4.1.11"
   },
   "dependencies": {
+    "react-icons": "^5.5.0",
+    "react-window": "^2.1.0",
     "three": "^0.180.0"
   }
 }

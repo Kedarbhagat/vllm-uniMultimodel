@@ -109,7 +109,7 @@ class ConversationalAgent:
             openai_api_base=f"{API_GATEWAY_URL}/v1",
             openai_api_key=os.getenv("YOUR_API_KEY", "token-abc123"),
             temperature=0.7,
-            max_tokens=5000,
+            #max_tokens=5000,
             streaming=True,
         )
         self.prompt_template = prompt_template
@@ -125,7 +125,7 @@ class ConversationalAgent:
             print()
             return AIMessage(content="".join(content_buffer))
         except Exception as e:
-            print(f"\n❌ Error during streaming: {e}")
+            print(f"\n❌ Error during streaming from agent: {e}")
             return AIMessage(content=f"Sorry, something went wrong: {e}")
 
     def stream_response_for_web(self, messages: List[BaseMessage]):
@@ -135,7 +135,7 @@ class ConversationalAgent:
                 if chunk.content:
                     yield chunk.content  # Yield, do NOT print
         except Exception as e:
-            yield f"\n❌ Error during streaming: {e}"
+            yield f"\n❌ Error during streaming from agent: {e}"
 
     def _prepare_messages(self, messages: List[BaseMessage]) -> List[BaseMessage]:
         if not messages:

@@ -9,7 +9,7 @@ import httpx
 
 # --- Configuration for Llama 3.1 Worker ---
 REDIS_HOST = os.getenv("REDIS_HOST", "172.31.21.186")
-REDIS_PORT = int(os.getenv("REDIS_PORT", 6379)) 
+REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
 
 MODEL_QUEUE_TO_LISTEN = "llm_task_queue:llama3_1_8b"
 VLLM_BACKEND_URL = "http://172.31.21.186:8000/v1/chat/completions"
@@ -19,7 +19,7 @@ STREAM_RESPONSE_PREFIX = "llm:response:stream:"
 # --- Logging Setup ---
 logging.basicConfig(
     level=os.getenv("LOG_LEVEL", "INFO").upper(),
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger("llama_worker")
 
@@ -27,43 +27,49 @@ logger = logging.getLogger("llama_worker")
 redis_client: Optional[redis.Redis] = None
 http_client: Optional[httpx.AsyncClient] = None
 
+
 async def initialize_clients():
+    """Initialize Redis and HTTP clients."""
     global redis_client, http_client
 
-    logger.info(f"Initializing Llama 3.1 worker for queue: {MODEL_QUEUE_TO_LISTEN}, backend: {VLLM_BACKEND_URL}")
+    logger.info(
+        f"Initializing Llama 3.1 worker for queue: {MODEL_QUEUE_TO_LISTEN}, backend: {VLLM_BACKEND_URL}"
+    )
 
-    try:
-        redis_client = redis.Redis(
-            host=REDIS_HOST,
-            port=REDIS_PORT,
-            db=0,
-            decode_responses=True,
-            socket_connect_timeout=10,
-            socket_timeout=3600,
-        )
-        await redis_client.ping()
-        logger.info(f"Connected to Redis at {REDIS_HOST}:{REDIS_PORT}")
+    redis_client = redis.Redis(
+        host=REDIS_HOST,
+        port=REDIS_PORT,
+        db=0,
+        decode_responses=True,
+        socket_connect_timeout=10,
+        socket_timeout=None,  # don’t kill connection too early
+        socket_keepalive=True,
+    )
+    await redis_client.ping()
+    logger.info(f"Connected to Redis at {REDIS_HOST}:{REDIS_PORT}")
 
-        http_client = httpx.AsyncClient(timeout=httpx.Timeout(300.0, connect=10.0))
-        logger.info("HTTPX client initialized")
+    http_client = httpx.AsyncClient(timeout=httpx.Timeout(300.0, connect=10.0))
+    logger.info("HTTPX client initialized")
 
-    except Exception as e:
-        logger.error(f"Failed to initialize clients for Llama worker: {e}")
-        raise
 
 async def close_clients():
+    """Gracefully close clients."""
     global redis_client, http_client
     if redis_client:
-        await redis_client.close()
+        await redis_client.aclose()
         logger.info("Llama worker: Redis connection closed")
+        redis_client = None
     if http_client:
         await http_client.aclose()
         logger.info("Llama worker: HTTPX client closed")
+        http_client = None
+
 
 async def process_task(task_data: Dict[str, Any], r: redis.Redis, http_client: httpx.AsyncClient):
+    """Process a single LLM task."""
     task_id = task_data.get("task_id")
     raw_model_name = task_data.get("model", "")
-    model_name = raw_model_name # Normalize model name
+    model_name = raw_model_name
     logger.info(f"Llama worker: Normalized model name: '{model_name}'")
 
     messages = task_data.get("messages")
@@ -80,7 +86,7 @@ async def process_task(task_data: Dict[str, Any], r: redis.Redis, http_client: h
     payload = {
         "model": model_name,
         "messages": messages,
-        "max_tokens": max_tokens,
+        #"max_tokens": max_tokens,
         "temperature": temperature,
         "stream": is_streaming,
     }
@@ -135,50 +141,49 @@ async def process_task(task_data: Dict[str, Any], r: redis.Redis, http_client: h
             await r.set(status_key, "completed", ex=3600)
             logger.info(f"Llama worker: Completed non-streaming task {task_id}")
 
-    except httpx.RequestError as e:
-        error_message = f"Llama worker: HTTPX request error for task {task_id}: {e}"
-        logger.error(error_message)
-        if is_streaming:
-            await r.xadd(response_stream_name, {"error": error_message, "done": "true"})
-        await r.set(status_key, "failed", ex=3600)
-        await r.set(result_key, json.dumps({"error": error_message}), ex=3600)
-
-    except httpx.HTTPStatusError as e:
-        error_message = f"Llama worker: HTTP error {e.response.status_code} for task {task_id}: {e.response.text}"
-        logger.error(error_message)
-        if is_streaming:
-            await r.xadd(response_stream_name, {"error": error_message, "done": "true"})
-        await r.set(status_key, "failed", ex=3600)
-        await r.set(result_key, json.dumps({"error": error_message}), ex=3600)
-
     except Exception as e:
-        error_message = f"Llama worker: An unexpected error occurred for task {task_id}: {e}"
+        error_message = f"Llama worker: Error in task {task_id}: {e}"
         logger.exception(error_message)
         if is_streaming:
             await r.xadd(response_stream_name, {"error": error_message, "done": "true"})
         await r.set(status_key, "failed", ex=3600)
         await r.set(result_key, json.dumps({"error": error_message}), ex=3600)
 
-async def main():
-    await initialize_clients()
-    logger.info(f"Llama worker started, listening on queue: {MODEL_QUEUE_TO_LISTEN}")
-    try:
-        while True:
-            _queue_name, task_json = await redis_client.blpop(MODEL_QUEUE_TO_LISTEN, timeout=0)
+
+async def main_loop():
+    """Main loop with Redis reconnect + retry."""
+    global redis_client, http_client
+
+    while True:
+        try:
+            if redis_client is None or http_client is None:
+                await initialize_clients()
+
+            result = await redis_client.blpop(MODEL_QUEUE_TO_LISTEN, timeout=30)
+            if result is None:
+                # no tasks within timeout window
+                continue
+
+            _queue_name, task_json = result
             if task_json:
                 task_data = json.loads(task_json)
                 asyncio.create_task(process_task(task_data, redis_client, http_client))
-    except asyncio.CancelledError:
-        logger.info("Llama worker processing cancelled.")
-    except Exception as e:
-        logger.exception(f"Fatal error in Llama worker main loop: {e}")
-    finally:
-        await close_clients()
+
+        except (ConnectionError, OSError) as e:
+            logger.warning(f"Redis connection error: {e}, reconnecting in 5s...")
+            await close_clients()
+            await asyncio.sleep(5)
+
+        except Exception as e:
+            logger.exception(f"Unexpected error in main loop: {e}")
+            await close_clients()
+            await asyncio.sleep(5)
+
 
 if __name__ == "__main__":
     logger.info("Starting Llama LLM Worker.")
     try:
-        asyncio.run(main())
+        asyncio.run(main_loop())
     except KeyboardInterrupt:
         logger.info("Llama worker shutdown requested by user (KeyboardInterrupt).")
     except Exception as e:

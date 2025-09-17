@@ -64,7 +64,7 @@ class ChatRequest(BaseModel):
     model: str
     messages: List[ChatMessage]
     temperature: Optional[float] = 0.7
-    #max_tokens: Optional[int] = None
+    max_tokens: Optional[int] = None
     stream: Optional[bool] = False
 
 class TaskResponse(BaseModel):

@@ -13,8 +13,8 @@ scrape_configs:
     scrape_interval: 5s
     static_configs:
       - targets: ['172.31.21.186:8002']  # LLaMA FastAPI metrics
-
+  
   - job_name: 'LLaMA'
     scrape_interval: 5s
     static_configs:
-      - targets: ['172.31.21.186:8002']  # LLaMA FastAPI metrics
+      - targets: ['172.31.21.186:8000']  # LLaMA FastAPI metrics
