@@ -41,7 +41,7 @@ async def initialize_clients():
         port=REDIS_PORT,
         db=0,
         decode_responses=True,
-        socket_connect_timeout=30,
+        socket_connect_timeout=10,
         socket_timeout=None,  # don’t kill connection too early
         socket_keepalive=True,
     )
