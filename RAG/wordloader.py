@@ -200,9 +200,9 @@ def convert_word_to_langchain_docs(
         logger.error(f"Failed to process Word document {doc_path}: {str(e)}")
         return []
 
-# Universal document processor
+# In wordloader.py, update the process_document function:
 def process_document(file_path: str, **kwargs) -> List[Document]:
-    """Process any supported document type (PDF, DOCX, DOC)"""
+    """Process any supported document type (PDF, DOCX, DOC, XLSX, XLS)"""
     file_ext = os.path.splitext(file_path)[1].lower()
 
     try:
@@ -210,9 +210,23 @@ def process_document(file_path: str, **kwargs) -> List[Document]:
             return convert_to_langchain_docs(file_path, **kwargs)
         elif file_ext in ['.docx', '.doc']:
             return convert_word_to_langchain_docs(file_path, **kwargs)
+        elif file_ext in ['.xlsx', '.xls']:
+            # Import Excel loader when needed (avoids circular import)
+            try:
+                from excel_loader import convert_excel_to_langchain_docs
+                logger.info(f"Successfully imported excel_loader for {file_path}")
+                result = convert_excel_to_langchain_docs(file_path, **kwargs)
+                logger.info(f"Excel processing returned {len(result)} documents")
+                return result
+            except ImportError as e:
+                logger.error(f"Failed to import excel_loader: {e}")
+                raise
+            except Exception as e:
+                logger.error(f"Excel processing failed: {e}")
+                raise
         else:
             logger.error(f"Unsupported file extension: {file_ext}")
             return []
     except Exception as e:
-        logger.error(f"Document processing failed: {str(e)}")
-        return []
+        logger.error(f"Document processing failed for {file_path}: {str(e)}")
+        raise

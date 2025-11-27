@@ -29,7 +29,8 @@ os.environ["OPENAI_API_KEY"] = os.getenv("OPENAI_API_KEY", "token-abc123")
 #)
 MODEL_REGISTRY = {
     "llama": "./meta-llama/Llama-3.1-8B-Instruct-awq",
-    "deepseek": "./DeepSeek-Coder-V2-Lite-Instruct-awq"
+    "deepseek": "./DeepSeek-Coder-V2-Lite-Instruct-awq",
+    "qwen2.5": "/mnt/c/Users/STUDENT/qwen2.5-coder-14b-instruct-awq-final"
 }
 API_GATEWAY_URL = "http://192.168.190.28:8082"
 DEFAULT_MODEL = "llama"

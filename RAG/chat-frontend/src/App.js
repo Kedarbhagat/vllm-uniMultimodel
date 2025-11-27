@@ -116,7 +116,7 @@ const Toast = React.memo(({ message, type = 'error', onClose }) => {
     <div className={`fixed top-4 right-4 ${bgColor} text-white px-6 py-3 rounded-lg shadow-lg z-50 max-w-md`}>
       <div className="flex items-center justify-between">
         <span>{message}</span>
-        <button onClick={onClose} className="ml-4 text-white hover:text-gray-200">×</button>
+        <button onClick={onClose} className="ml-4 text-white hover:text-gray-200">Ã—</button>
       </div>
     </div>
   );
@@ -136,7 +136,7 @@ const ChatFrontend = () => {
   const [authError, setAuthError] = useState(null);
   
   // UI state
-  const [selectedModel, setSelectedModel] = useState('llama');
+  const [selectedModel, setSelectedModel] = useState('qwen2.5'); // Default model
   
   // Thread-specific document storage
   const [threadDocuments, setThreadDocuments] = useState(new Map());
@@ -401,9 +401,24 @@ const ChatFrontend = () => {
       return;
     }
 
-    const allowedTypes = ['application/pdf', 'text/plain', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
-    if (!allowedTypes.includes(file.type)) {
-      showToast('Supported file types: PDF, TXT, DOC, DOCX');
+    // allow Excel MIME types + CSV. Also validate by extension as a fallback.
+    const allowedTypes = [
+      'application/pdf',
+      'text/plain',
+      'application/msword',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', // xlsx
+      'application/vnd.ms-excel', // xls
+      'text/csv'
+    ];
+    const allowedExts = ['.pdf', '.txt', '.doc', '.docx', '.xlsx', '.xls', '.csv'];
+
+    const nameLower = (file.name || '').toLowerCase();
+    const ext = nameLower.includes('.') ? nameLower.slice(nameLower.lastIndexOf('.')) : '';
+
+    // Accept if MIME allowed OR extension allowed (fallback)
+    if (!(allowedTypes.includes(file.type) || allowedExts.includes(ext))) {
+      showToast('Supported file types: PDF, TXT, DOC, DOCX, XLSX, XLS, CSV');
       return;
     }
 
@@ -447,7 +462,7 @@ const ChatFrontend = () => {
       setIsUploading(false);
     }
   }, [activeThread, showToast, addSystemMessage, setCurrentThreadDocument]);
-
+  
   // PERFORMANCE FIX: Optimized send message handler
   const sendMessage = useCallback(async (messageContent) => {
     if (!messageContent || !activeThread || isLoading) return;
@@ -481,7 +496,7 @@ const ChatFrontend = () => {
         payload = {
           thread_id: activeThread,
           message: messageContent,
-          model: selectedModel
+          model: selectedModel // Include the selected model in the payload
         };
       }
 
@@ -797,7 +812,7 @@ const ChatFrontend = () => {
                 type="file"
                 onChange={(e) => e.target.files[0] && onFileUpload(e.target.files[0])}
                 className="hidden"
-                accept=".pdf,.txt,.doc,.docx"
+                accept=".pdf,.txt,.doc,.docx,.xlsx,.xls,.csv"
               />
               <button
                 onClick={() => fileInputRef.current?.click()}
@@ -1138,11 +1153,17 @@ const ChatFrontend = () => {
                   <label className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300 mb-1">Model</label>
                   <select
                     value={selectedModel}
-                    onChange={(e) => setSelectedModel(e.target.value)}
+                    onChange={(e) => {
+                      const newModel = e.target.value;
+                      setSelectedModel(newModel);
+                      showToast(`Model switched to ${newModel}`, 'success'); // Optional toast notification
+                    }}
                     className="w-full p-2 border border-zinc-300 dark:border-zinc-700 rounded-md text-base bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100"
                   >
                     <option value="llama">Llama 3.1 8B</option>
                     <option value="deepseek">DeepSeek Coder V2</option>
+                    <option value="qwen2.5">Qwen 2.5</option> {/* Newly added option */}
+                    
                   </select>
                 </div>
               </div>
@@ -1201,7 +1222,7 @@ const ChatFrontend = () => {
               <div className="flex items-center gap-5">
                 <DarkModeToggle />
                 <div className="text-base text-zinc-500 dark:text-zinc-300 whitespace-nowrap">
-                  Model: {selectedModel === 'llama' ? 'Llama 3.1 8B' : 'DeepSeek Coder V2'}
+                  Model: {selectedModel === 'llama' ? 'Llama 3.1 8B' : selectedModel === 'deepseek' ? 'DeepSeek Coder V2' : 'Qwen 2.5'}
                 </div>
                 <UserCircle />
               </div>

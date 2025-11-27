@@ -28,6 +28,11 @@ MODEL_CONFIG: Dict[str, Dict[str, str]] = {
         "queue_name": "llm_task_queue:deepseek_v2_lite"
     },
     # Add other models with their specific backend and queue names if needed
+
+    "/mnt/c/Users/STUDENT/qwen2.5-coder-14b-instruct-awq-final":{
+        "backend_url": "http://172.31.21.186:8010/v1/chat/completions",
+        "queue_name": "llm_task_queue:qwen2_5_coder_14b"
+    }
 }
 
 STREAM_RESPONSE_PREFIX = "llm:response:stream:"
@@ -123,6 +128,8 @@ async def create_chat_completion(
 ):
     # Retrieve model configuration including backend URL and queue name
     model_config = MODEL_CONFIG.get(request.model)
+    print("\n -------------------------------\n")
+    print("model config:",model_config)
     if not model_config:
         raise HTTPException(
             status_code=400,
