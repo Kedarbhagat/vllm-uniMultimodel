@@ -1,0 +1,52 @@
+node_modules
+*.bin
+
+# Python cache and virtual environments
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+venv_rag/
+venv/
+.venv/
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Secrets and local environment configuration
+.env
+.env.*
+!.env.example
+auth/.env
+
+# Test and runtime data
+testing_locust/locust_run_*.csv
+testing_locust/results/
+testing_locust/results.zip
+testing_locust/*.pyc
+
+# RAG data and uploads
+RAG/llm_net_data/uploads/
+RAG/llm_net_data/vectorstores/
+RAG/__pycache__/
+RAG/chroma_db_data/
+RAG/LLMNET_USER_DOCS/
+RAG/*.pdf
+llm_net_data/
+RAG/llm_net_data/
+__pycache__/
+*.log
+
+# VS Code user settings
+.vscode/settings.json
+.vscode/tasks.json
+
+# Application databases
+app.db
+RAG/app.db
+
+# Misc
+quan/

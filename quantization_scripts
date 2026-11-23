@@ -1,0 +1,27 @@
+  GNU nano 7.2                                        deepseekquant.py
+from awq import AutoAWQForCausalLM
+from transformers import AutoTokenizer
+import torch
+import os
+
+# Optional: Better CUDA memory handling
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:128"
+torch.cuda.empty_cache()
+
+# Model source and output paths
+model_path = "deepseek-ai/DeepSeek-Coder-V2-Lite-Instruct"
+quant_path = "./DeepSeek-Coder-V2-Lite-Instruct-awq"
+
+# AWQ quantization config
+quant_config = {
+    "zero_point": True,
+    "q_group_size": 128,
+    "w_bit": 4,
+    "version": "GEMM"
+}
+
+# Load and prepare model for quantization
+print("⏳ Loading model...")
+model = AutoAWQForCausalLM.from_pretrained(
+    model_path,
+    trust_remote_code=True,
